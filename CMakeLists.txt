@@ -42,6 +42,7 @@ target_include_directories(LinearNdInterpolator
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
+        ${QHULL_DIR}/src
         ${QHULL_DIR}/src/libqhullcpp
         ${QHULL_DIR}/src/libqhull_r
 )
