@@ -68,9 +68,10 @@ void LinearNdInterpolator::setupTriangulation() {
         }
         
         // Create Qhull object for Delaunay triangulation
-        // "d" option creates Delaunay triangulation
-        // "QJ" option joggles input to avoid precision problems
-        std::string qhull_options = "d Qbb Qt QJ";
+        // "d" option creates Delaunay triangulation  
+        // "Qbb" scales last coordinate to [0,m] for Delaunay triangulation
+        // Remove "Qt" as it may interfere with 2D triangulation
+        std::string qhull_options = "d Qbb QJ";
         
         qhull_ = std::make_unique<orgQhull::Qhull>(
             "LinearNdInterpolator",
@@ -156,42 +157,42 @@ bool LinearNdInterpolator::findContainingSimplex(const std::vector<double>& poin
     }
     
     try {
-        // For Delaunay triangulation, we need to check all facets 
-        // to find one that contains the query point
+        // SciPy-style simplex finding: test all valid facets systematically
         orgQhull::QhullFacetList facets = qhull_->facetList();
         
         for (orgQhull::QhullFacetList::iterator it = facets.begin(); it != facets.end(); ++it) {
-            if (!it->isGood() || it->isUpperDelaunay()) continue;
+            // Skip bad facets
+            if (!it->isGood()) continue;
             
-            // For each facet (simplex), check if point is inside
-            // We use barycentric coordinates to test containment
-            if (isPointInSimplex(point, *it)) {
+            // Skip upper Delaunay facets (not actual simplices)
+            if (it->isUpperDelaunay()) continue;
+            
+            orgQhull::QhullVertexSet vertices = it->vertices();
+            if (vertices.count() != dimension_ + 1) continue;
+            
+            // Calculate barycentric coordinates
+            std::vector<double> barycentricCoords = calculateBarycentricCoordinates(point, *it);
+            if (barycentricCoords.empty()) continue;
+            
+            // Check if point is inside simplex (SciPy-style)
+            // All barycentric coordinates should be >= 0 and sum to 1
+            bool inside = true;
+            double sum = 0.0;
+            // Use a slightly larger tolerance for edge cases like collinear points
+            const double eps = 10000.0 * std::numeric_limits<double>::epsilon();
+            
+            for (double coord : barycentricCoords) {
+                sum += coord;
+                if (coord < -eps) {  // Allow small negative values due to numerical errors
+                    inside = false;
+                    break;
+                }
+            }
+            
+            // Check if coordinates sum to 1 (within tolerance)
+            if (inside && std::abs(sum - 1.0) < eps) {
                 facet = *it;
                 return true;
-            }
-        }
-        
-        // If no containing simplex found but we have valid data, use a simpler approach
-        // Just check the first valid simplex to see if we can perform interpolation
-        for (orgQhull::QhullFacetList::iterator it = facets.begin(); it != facets.end(); ++it) {
-            if (!it->isGood() || it->isUpperDelaunay()) continue;
-            
-            // Try this facet anyway for points very close to vertices
-            orgQhull::QhullVertexSet vertices = it->vertices();
-            if (vertices.count() == dimension_ + 1) {
-                // Check if point is very close to any vertex
-                for (orgQhull::QhullVertexSet::iterator vit = vertices.begin(); vit != vertices.end(); ++vit) {
-                    orgQhull::QhullPoint vertex_point = (*vit).point();
-                    double dist_sq = 0.0;
-                    for (size_t i = 0; i < dimension_; ++i) {
-                        double diff = point[i] - vertex_point[static_cast<int>(i)];
-                        dist_sq += diff * diff;
-                    }
-                    if (dist_sq < 1e-20) {  // Very close to vertex
-                        facet = *it;
-                        return true;
-                    }
-                }
             }
         }
         
@@ -199,42 +200,9 @@ bool LinearNdInterpolator::findContainingSimplex(const std::vector<double>& poin
         return false;
     }
     
-    return false;
+    return false;  // Point is outside convex hull
 }
 
-bool LinearNdInterpolator::isPointInSimplex(const std::vector<double>& point,
-                                           const orgQhull::QhullFacet& facet) const {
-    try {
-        // Get vertices of the simplex
-        orgQhull::QhullVertexSet vertices = facet.vertices();
-        if (vertices.count() != dimension_ + 1) {
-            return false;
-        }
-        
-        // Calculate barycentric coordinates
-        std::vector<double> barycentricCoords = calculateBarycentricCoordinates(point, facet);
-        
-        if (barycentricCoords.empty()) {
-            return false;
-        }
-        
-        // Check if all barycentric coordinates are non-negative and sum to 1
-        double sum = 0.0;
-        const double tolerance = 1e-8;  // Relaxed tolerance for numerical stability
-        
-        for (double coord : barycentricCoords) {
-            if (coord < -tolerance) {
-                return false;  // Point is outside
-            }
-            sum += coord;
-        }
-        
-        return std::abs(sum - 1.0) < tolerance;
-        
-    } catch (const std::exception&) {
-        return false;
-    }
-}
 
 
 std::vector<double> LinearNdInterpolator::calculateBarycentricCoordinates(
@@ -249,36 +217,53 @@ std::vector<double> LinearNdInterpolator::calculateBarycentricCoordinates(
         size_t num_vertices = vertices.count();
         
         if (num_vertices != dimension_ + 1) {
-            // Invalid simplex, return empty
             return coords;
         }
         
-        // Create matrix for barycentric coordinate calculation
-        // System: Ax = b where A is (dimension+1) x (dimension+1) matrix
-        std::vector<std::vector<double>> matrix(dimension_ + 1, std::vector<double>(dimension_ + 1));
-        std::vector<double> rhs(dimension_ + 1);
+        coords.resize(dimension_ + 1);
         
-        // Fill matrix with vertex coordinates and ones
-        size_t vertex_idx = 0;
-        for (orgQhull::QhullVertexSet::iterator vit = vertices.begin(); vit != vertices.end(); ++vit, ++vertex_idx) {
-            orgQhull::QhullPoint vertex_point = (*vit).point();
-            for (size_t i = 0; i < dimension_; ++i) {
-                matrix[i][vertex_idx] = vertex_point[static_cast<int>(i)];
-            }
-            matrix[dimension_][vertex_idx] = 1.0;  // Last row is all ones
-        }
+        // SciPy-style barycentric coordinate calculation
+        // Build transformation matrix T where T * lambda = (x - x0)
+        std::vector<std::vector<double>> transform_matrix(dimension_, std::vector<double>(dimension_));
+        std::vector<double> origin(dimension_);
         
-        // Fill right-hand side
+        // Get first vertex as origin
+        auto vit = vertices.begin();
+        orgQhull::QhullPoint first_vertex = (*vit).point();
         for (size_t i = 0; i < dimension_; ++i) {
-            rhs[i] = point[i];
+            origin[i] = first_vertex[static_cast<int>(i)];
         }
-        rhs[dimension_] = 1.0;  // Constraint: sum of coordinates = 1
         
-        // Solve linear system using Gaussian elimination
-        coords = solveLinearSystem(matrix, rhs);
+        // Fill transformation matrix with edge vectors
+        size_t col = 0;
+        ++vit; // Skip first vertex
+        for (; vit != vertices.end() && col < dimension_; ++vit, ++col) {
+            orgQhull::QhullPoint vertex_point = (*vit).point();
+            for (size_t row = 0; row < dimension_; ++row) {
+                transform_matrix[row][col] = vertex_point[static_cast<int>(row)] - origin[row];
+            }
+        }
+        
+        // Solve T * c_partial = (point - origin) for partial coordinates
+        std::vector<double> rhs(dimension_);
+        for (size_t i = 0; i < dimension_; ++i) {
+            rhs[i] = point[i] - origin[i];
+        }
+        
+        std::vector<double> partial_coords = solveLinearSystem(transform_matrix, rhs);
+        if (partial_coords.empty()) {
+            coords.clear();
+            return coords;
+        }
+        
+        // Convert to full barycentric coordinates
+        coords[0] = 1.0;
+        for (size_t i = 0; i < dimension_; ++i) {
+            coords[i + 1] = partial_coords[i];
+            coords[0] -= partial_coords[i];
+        }
         
     } catch (const std::exception&) {
-        // Return empty on error
         coords.clear();
     }
     
@@ -287,17 +272,21 @@ std::vector<double> LinearNdInterpolator::calculateBarycentricCoordinates(
 
 double LinearNdInterpolator::interpolateInSimplex(const std::vector<double>& barycentricCoords,
                                                 const orgQhull::QhullFacet& facet) const {
-    if (barycentricCoords.empty()) {
+    if (barycentricCoords.empty() || barycentricCoords.size() != dimension_ + 1) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
     try {
-        // Get vertices and their corresponding values
+        // Get vertices and their corresponding values (SciPy-style)
         orgQhull::QhullVertexSet vertices = facet.vertices();
+        if (vertices.count() != dimension_ + 1) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
         
         double interpolated_value = 0.0;
         size_t coord_idx = 0;
         
+        // SciPy-style: out[i,k] = out[i,k] + c[j] * values[m,k]
         for (orgQhull::QhullVertexSet::iterator vit = vertices.begin(); 
              vit != vertices.end() && coord_idx < barycentricCoords.size(); 
              ++vit, ++coord_idx) {
@@ -308,6 +297,9 @@ double LinearNdInterpolator::interpolateInSimplex(const std::vector<double>& bar
             
             if (point_idx < values_.size()) {
                 interpolated_value += barycentricCoords[coord_idx] * values_[point_idx];
+            } else {
+                // This should not happen - invalid vertex reference
+                return std::numeric_limits<double>::quiet_NaN();
             }
         }
         
@@ -344,7 +336,8 @@ std::vector<double> LinearNdInterpolator::solveLinearSystem(
             
             // Check for zero pivot (singular matrix)
             const double pivot = matrix[i][i];
-            if (std::abs(pivot) < 1e-12) {
+            // Use a more liberal tolerance for potentially ill-conditioned systems
+            if (std::abs(pivot) < 1000.0 * std::numeric_limits<double>::epsilon()) {
                 return std::vector<double>();  // Return empty on singular matrix
             }
             
@@ -376,21 +369,43 @@ std::vector<double> LinearNdInterpolator::solveLinearSystem(
 
 // Helper method to find point index by coordinates
 size_t LinearNdInterpolator::findPointIndex(const orgQhull::QhullPoint& vertex_point) const {
-    const double tolerance = 1e-12;
+    // Use a more appropriate tolerance for coordinate matching
+    const double tolerance = 1000.0 * std::numeric_limits<double>::epsilon();
     
     for (size_t i = 0; i < num_points_; ++i) {
         bool match = true;
+        double max_diff = 0.0;
+        
         for (size_t j = 0; j < dimension_; ++j) {
-            if (std::abs(vertex_point[static_cast<int>(j)] - points_[i][j]) > tolerance) {
+            double diff = std::abs(vertex_point[static_cast<int>(j)] - points_[i][j]);
+            max_diff = std::max(max_diff, diff);
+            if (diff > tolerance) {
                 match = false;
                 break;
             }
         }
+        
         if (match) {
             return i;
         }
     }
     
-    // Should not happen in normal cases
-    return 0;
+    // Debug: Should not happen in normal cases
+    // Return the closest point as fallback
+    size_t closest_idx = 0;
+    double min_distance = std::numeric_limits<double>::max();
+    
+    for (size_t i = 0; i < num_points_; ++i) {
+        double distance = 0.0;
+        for (size_t j = 0; j < dimension_; ++j) {
+            double diff = vertex_point[static_cast<int>(j)] - points_[i][j];
+            distance += diff * diff;
+        }
+        if (distance < min_distance) {
+            min_distance = distance;
+            closest_idx = i;
+        }
+    }
+    
+    return closest_idx;
 }

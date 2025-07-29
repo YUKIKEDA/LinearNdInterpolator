@@ -74,9 +74,21 @@ if(BUILD_TESTS)
         gtest_main
     )
     
+    # SciPy reference tests (auto-generated from JSON data)
+    add_executable(test_scipy_reference
+        tests/test_scipy_reference_auto_generated.cpp
+    )
+    
+    target_link_libraries(test_scipy_reference
+        LinearNdInterpolator
+        gtest_main
+    )
+    
     include(GoogleTest)
     gtest_discover_tests(test_hello_world)
+    gtest_discover_tests(test_scipy_reference)
 endif()
+
 
 # インストール設定
 install(TARGETS LinearNdInterpolator
