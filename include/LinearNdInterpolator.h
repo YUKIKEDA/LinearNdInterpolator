@@ -65,9 +65,4 @@ private:
     size_t findPointIndex(const orgQhull::QhullPoint& vertex_point) const;
     bool isPointInSimplex(const std::vector<double>& point,
                          const orgQhull::QhullFacet& facet) const;
-    std::vector<double> calculateBarycentricCoordinatesForTest(
-        const std::vector<double>& point, 
-        const orgQhull::QhullFacet& facet) const;
-    std::vector<double> solveLinearSystemForTest(std::vector<std::vector<double>>& matrix, 
-                                                std::vector<double>& rhs) const;
 };

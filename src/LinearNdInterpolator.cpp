@@ -3,7 +3,6 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
-#include <numeric>
 
 // Qhull includes
 #include "libqhullcpp/Qhull.h"
@@ -161,14 +160,8 @@ bool LinearNdInterpolator::findContainingSimplex(const std::vector<double>& poin
         // to find one that contains the query point
         orgQhull::QhullFacetList facets = qhull_->facetList();
         
-        // Debug: Count facets
-        size_t facet_count = 0;
-        size_t good_facets = 0;
-        
         for (orgQhull::QhullFacetList::iterator it = facets.begin(); it != facets.end(); ++it) {
-            facet_count++;
             if (!it->isGood() || it->isUpperDelaunay()) continue;
-            good_facets++;
             
             // For each facet (simplex), check if point is inside
             // We use barycentric coordinates to test containment
@@ -219,7 +212,7 @@ bool LinearNdInterpolator::isPointInSimplex(const std::vector<double>& point,
         }
         
         // Calculate barycentric coordinates
-        std::vector<double> barycentricCoords = calculateBarycentricCoordinatesForTest(point, facet);
+        std::vector<double> barycentricCoords = calculateBarycentricCoordinates(point, facet);
         
         if (barycentricCoords.empty()) {
             return false;
@@ -243,108 +236,6 @@ bool LinearNdInterpolator::isPointInSimplex(const std::vector<double>& point,
     }
 }
 
-std::vector<double> LinearNdInterpolator::calculateBarycentricCoordinatesForTest(
-    const std::vector<double>& point, 
-    const orgQhull::QhullFacet& facet) const {
-    
-    std::vector<double> coords;
-    
-    try {
-        // Get vertices of the simplex
-        orgQhull::QhullVertexSet vertices = facet.vertices();
-        size_t num_vertices = vertices.count();
-        
-        if (num_vertices != dimension_ + 1) {
-            // Invalid simplex, return empty
-            return coords;
-        }
-        
-        // Create matrix for barycentric coordinate calculation
-        // System: Ax = b where A is (dimension+1) x (dimension+1) matrix
-        std::vector<std::vector<double>> matrix(dimension_ + 1, std::vector<double>(dimension_ + 1));
-        std::vector<double> rhs(dimension_ + 1);
-        
-        // Fill matrix with vertex coordinates and ones
-        size_t vertex_idx = 0;
-        for (orgQhull::QhullVertexSet::iterator vit = vertices.begin(); vit != vertices.end(); ++vit, ++vertex_idx) {
-            orgQhull::QhullPoint vertex_point = (*vit).point();
-            for (size_t i = 0; i < dimension_; ++i) {
-                matrix[i][vertex_idx] = vertex_point[static_cast<int>(i)];
-            }
-            matrix[dimension_][vertex_idx] = 1.0;  // Last row is all ones
-        }
-        
-        // Fill right-hand side
-        for (size_t i = 0; i < dimension_; ++i) {
-            rhs[i] = point[i];
-        }
-        rhs[dimension_] = 1.0;  // Constraint: sum of coordinates = 1
-        
-        // Solve linear system using Gaussian elimination
-        coords = solveLinearSystemForTest(matrix, rhs);
-        
-    } catch (const std::exception&) {
-        // Return empty on error
-        coords.clear();
-    }
-    
-    return coords;
-}
-
-std::vector<double> LinearNdInterpolator::solveLinearSystemForTest(
-    std::vector<std::vector<double>>& matrix, 
-    std::vector<double>& rhs) const {
-    
-    size_t n = matrix.size();
-    std::vector<double> solution(n);
-    
-    try {
-        // Forward elimination
-        for (size_t i = 0; i < n; ++i) {
-            // Find pivot
-            size_t pivot_row = i;
-            for (size_t k = i + 1; k < n; ++k) {
-                if (std::abs(matrix[k][i]) > std::abs(matrix[pivot_row][i])) {
-                    pivot_row = k;
-                }
-            }
-            
-            // Swap rows
-            if (pivot_row != i) {
-                std::swap(matrix[i], matrix[pivot_row]);
-                std::swap(rhs[i], rhs[pivot_row]);
-            }
-            
-            // Check for zero pivot
-            if (std::abs(matrix[i][i]) < 1e-12) {
-                return std::vector<double>();  // Return empty on singular matrix
-            }
-            
-            // Eliminate
-            for (size_t k = i + 1; k < n; ++k) {
-                double factor = matrix[k][i] / matrix[i][i];
-                for (size_t j = i; j < n; ++j) {
-                    matrix[k][j] -= factor * matrix[i][j];
-                }
-                rhs[k] -= factor * rhs[i];
-            }
-        }
-        
-        // Back substitution
-        for (int i = static_cast<int>(n) - 1; i >= 0; --i) {
-            solution[i] = rhs[i];
-            for (size_t j = i + 1; j < n; ++j) {
-                solution[i] -= matrix[i][j] * solution[j];
-            }
-            solution[i] /= matrix[i][i];
-        }
-        
-        return solution;
-        
-    } catch (const std::exception&) {
-        return std::vector<double>();
-    }
-}
 
 std::vector<double> LinearNdInterpolator::calculateBarycentricCoordinates(
     const std::vector<double>& point, 
@@ -427,55 +318,60 @@ double LinearNdInterpolator::interpolateInSimplex(const std::vector<double>& bar
     }
 }
 
-// Helper method to solve linear system (simple Gaussian elimination)
 std::vector<double> LinearNdInterpolator::solveLinearSystem(
     std::vector<std::vector<double>>& matrix, 
     std::vector<double>& rhs) const {
     
-    size_t n = matrix.size();
+    const size_t n = matrix.size();
     std::vector<double> solution(n);
     
-    // Forward elimination
-    for (size_t i = 0; i < n; ++i) {
-        // Find pivot
-        size_t pivot_row = i;
-        for (size_t k = i + 1; k < n; ++k) {
-            if (std::abs(matrix[k][i]) > std::abs(matrix[pivot_row][i])) {
-                pivot_row = k;
+    try {
+        // Forward elimination with partial pivoting
+        for (size_t i = 0; i < n; ++i) {
+            // Find pivot
+            size_t pivot_row = i;
+            for (size_t k = i + 1; k < n; ++k) {
+                if (std::abs(matrix[k][i]) > std::abs(matrix[pivot_row][i])) {
+                    pivot_row = k;
+                }
+            }
+            
+            // Swap rows if needed
+            if (pivot_row != i) {
+                std::swap(matrix[i], matrix[pivot_row]);
+                std::swap(rhs[i], rhs[pivot_row]);
+            }
+            
+            // Check for zero pivot (singular matrix)
+            const double pivot = matrix[i][i];
+            if (std::abs(pivot) < 1e-12) {
+                return std::vector<double>();  // Return empty on singular matrix
+            }
+            
+            // Eliminate
+            for (size_t k = i + 1; k < n; ++k) {
+                const double factor = matrix[k][i] / pivot;
+                for (size_t j = i; j < n; ++j) {
+                    matrix[k][j] -= factor * matrix[i][j];
+                }
+                rhs[k] -= factor * rhs[i];
             }
         }
         
-        // Swap rows
-        if (pivot_row != i) {
-            std::swap(matrix[i], matrix[pivot_row]);
-            std::swap(rhs[i], rhs[pivot_row]);
-        }
-        
-        // Check for zero pivot
-        if (std::abs(matrix[i][i]) < 1e-12) {
-            throw std::runtime_error("Singular matrix in barycentric coordinate calculation");
-        }
-        
-        // Eliminate
-        for (size_t k = i + 1; k < n; ++k) {
-            double factor = matrix[k][i] / matrix[i][i];
-            for (size_t j = i; j < n; ++j) {
-                matrix[k][j] -= factor * matrix[i][j];
+        // Back substitution
+        for (int i = static_cast<int>(n) - 1; i >= 0; --i) {
+            solution[i] = rhs[i];
+            for (size_t j = i + 1; j < n; ++j) {
+                solution[i] -= matrix[i][j] * solution[j];
             }
-            rhs[k] -= factor * rhs[i];
+            solution[i] /= matrix[i][i];
         }
+        
+        return solution;
+        
+    } catch (const std::exception&) {
+        return std::vector<double>();  // Return empty on error
     }
-    
-    // Back substitution
-    for (int i = static_cast<int>(n) - 1; i >= 0; --i) {
-        solution[i] = rhs[i];
-        for (size_t j = i + 1; j < n; ++j) {
-            solution[i] -= matrix[i][j] * solution[j];
-        }
-        solution[i] /= matrix[i][i];
-    }
-    
-    return solution;
 }
 
 // Helper method to find point index by coordinates
