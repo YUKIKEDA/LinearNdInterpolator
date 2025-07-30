@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
+#include <iostream>
 
 // Qhull includes
 #include "libqhullcpp/Qhull.h"
@@ -15,397 +16,202 @@
 
 LinearNdInterpolator::LinearNdInterpolator(
     const std::vector<std::vector<double>>& points, 
-    const std::vector<double>& values
-)
-    : points_(points), values_(values) {
+    const std::vector<std::vector<double>>& values) {
     
-    // Input validation
-    if (points.empty() || values.empty()) {
-        throw std::invalid_argument("Points and values cannot be empty");
+    // 補間点座標と値を初期化
+    initialize(points, values);
+}
+
+LinearNdInterpolator::LinearNdInterpolator(
+    const std::vector<std::vector<double>>& points, 
+    const std::vector<double>& values) {
+    
+    // 1次元の場合は、2次元の場合に変換（各値を要素数1のベクトルに変換）
+    std::vector<std::vector<double>> values2d(values.size(), std::vector<double>(1));
+    for (size_t i = 0; i < values.size(); ++i) {
+        values2d[i][0] = values[i];
     }
-    
-    if (points.size() != values.size()) {
-        throw std::invalid_argument("Number of points and values must match");
-    }
-    
-    num_points_ = points.size();
-    dimension_ = points[0].size();
-    
-    // Dimension consistency check
-    for (const auto& point : points) {
-        if (point.size() != dimension_) {
-            throw std::invalid_argument("All points must have the same dimension");
-        }
-    }
-    
-    if (dimension_ == 0) {
-        throw std::invalid_argument("Points must have at least one dimension");
-    }
-    
-    // Need at least dimension + 1 points for triangulation
-    if (num_points_ < dimension_ + 1) {
-        throw std::invalid_argument("Need at least dimension + 1 points for triangulation");
-    }
-    
-    // Setup Delaunay triangulation
-    setupTriangulation();
+
+    // 補間点座標と値を初期化
+    initialize(points, values2d);
 }
 
 LinearNdInterpolator::~LinearNdInterpolator() {
     // Smart pointer handles cleanup automatically
 }
 
-void LinearNdInterpolator::setupTriangulation() {
-    try {
-        // Flatten points for Qhull
-        flat_points_.clear();
-        flat_points_.reserve(num_points_ * dimension_);
-        
-        for (const auto& point : points_) {
-            for (double coord : point) {
-                flat_points_.push_back(coord);
-            }
+
+// **************************************************
+// パブリックメソッド
+// **************************************************
+
+std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
+    const std::vector<std::vector<double>> &query) const
+{    
+    // 入力点の検証
+    if (query.empty()) {
+        return std::vector<std::vector<double>>();
+    }
+
+    // 入力点の次元数チェック (すべてのクエリ点の次元が補間点の次元と一致しているか)
+    const size_t expected_dimension = points_[0].size();
+    for (const auto& q : query) {
+        if (q.size() != expected_dimension) {
+            throw std::invalid_argument(
+                "Input points dimension (" + 
+                std::to_string(q.size()) + 
+                ") does not match expected dimension (" + 
+                std::to_string(expected_dimension) + 
+                ")"
+            );
         }
+    }
+
+    // 結果を格納するベクトルを初期化
+    std::vector<std::vector<double>> results;
+    results.reserve(query.size());
+
+    // **************************************************
+    // パフォーマンス最適化のための変数
+    // **************************************************
+    
+    // TODO: 以下の変数を追加
+    // - 単体検索の開始位置（前回の結果を利用）
+    // - 数値精度のためのepsilon値
+    // - 値の次元数
+    
+    // **************************************************
+    // 各入力点に対して補間を実行
+    // **************************************************
+    for (const auto& q : query) {
+        // **************************************************
+        // 1) 単体（シンプレックス）を見つける
+        // **************************************************
         
-        // Create Qhull object for Delaunay triangulation
-        // "d" option creates Delaunay triangulation  
-        // "Qbb" scales last coordinate to [0,m] for Delaunay triangulation
-        // Remove "Qt" as it may interfere with 2D triangulation
-        std::string qhull_options = "d Qbb QJ";
+        // TODO: Qhullを使用して点が含まれる単体を特定
+        // - Delaunay三角分割から単体を検索
+        // - 重心座標を計算
+        // - 単体が見つからない場合（凸包外）は最近傍値を返す
         
-        qhull_ = std::make_unique<orgQhull::Qhull>(
-            "LinearNdInterpolator",
-            static_cast<int>(dimension_),
-            static_cast<int>(num_points_),
-            flat_points_.data(),
-            qhull_options.c_str()
+        // SciPyの実装に基づく構造:
+        // - qhull._find_simplex()を使用して単体を検索
+        // - 重心座標c[]を計算
+        // - isimplex == -1の場合は凸包外
+        
+        // **************************************************
+        // 2) 線形重心座標補間を実行
+        // **************************************************
+        
+        // TODO: 重心座標を使用した線形補間
+        // - 単体の各頂点の値と重心座標の重み付き和を計算
+        // - 複数の値次元がある場合は各次元に対して補間を実行
+        
+        // SciPyの実装に基づく構造:
+        // for (j = 0; j < ndim+1; j++) {
+        //     for (k = 0; k < nvalues; k++) {
+        //         m = simplices[isimplex,j];
+        //         out[i,k] = out[i,k] + c[j] * values[m,k];
+        //     }
+        // }
+        
+        // **************************************************
+        // 3) 結果を格納
+        // **************************************************
+        
+        // TODO: 補間結果をresultsに追加
+        // - 値の次元数に応じて適切な形式で格納
+        // - 凸包外の場合はfill_value（NaN）を設定
+        
+        // **************************************************
+        // 4) エラーハンドリングとfill_valueの処理
+        // **************************************************
+        
+        // TODO: 以下の処理を実装
+        // - 単体が見つからない場合（isimplex == -1）の処理
+        // - 数値精度の問題に対する対処
+        
+        // SciPyの実装に基づく構造:
+        // if (isimplex == -1) {
+        //     // 凸包外の場合はnanを設定
+        //     for (k = 0; k < nvalues; k++) {
+        //         out[i,k] = nan;
+        //     }
+        //     continue;
+        // }
+        
+        // 仮の実装（後で削除）
+        results.push_back(std::vector<double>(values_[0].size(), std::numeric_limits<double>::quiet_NaN()));
+    }
+
+    return results;
+}
+
+
+// **************************************************
+// プライベートメソッド
+// **************************************************
+
+void LinearNdInterpolator::initialize(
+    const std::vector<std::vector<double>> &points, 
+    const std::vector<std::vector<double>> &values)
+{
+    // **************************************************
+    // 入力値のバリデーション
+    // **************************************************
+    throwifInvalidInputDataShape(points, values);
+
+    // 補間点座標と値が空の場合はエラー
+    if (points.empty() || values.empty()) {
+        throw std::invalid_argument("Points and values cannot be empty");
+    }
+
+    // 補間点座標の次元数が2未満の場合はエラー
+    const size_t point_dimension = points[0].size();
+    if (point_dimension < 2) {
+        throw std::invalid_argument("Points must have at least 2 dimensions");
+    }
+
+    // 補間点座標の次元の一貫性チェック(全ての補間点の次元が一致しているか)
+    for (const auto& point : points) {
+        if (point.size() != point_dimension) {
+            throw std::invalid_argument("All points must have the same dimension");
+        }
+    }
+
+    // 各点に対応する値の次元の一貫性チェック(全ての値の次元が一致しているか)
+    const size_t value_dimension = values[0].size();
+    for (const auto& value : values) {
+        if (value.size() != value_dimension) {
+            throw std::invalid_argument("All values must have the same dimension");
+        }
+    }
+
+    // 補間点座標と値をメンバ変数に格納
+    points_ = points;
+    values_ = values;
+
+    // ドロネー三角形分割を作成
+    setupTriangulation(points);
+}
+
+void LinearNdInterpolator::throwifInvalidInputDataShape(
+    const std::vector<std::vector<double>> &points,
+    const std::vector<std::vector<double>> &values) const
+{
+    // 補間点座標と値の数が一致しない場合はエラー
+    if (points.size() != values.size()) {
+        throw std::invalid_argument(
+            "Points size (" + 
+            std::to_string(points.size()) + 
+            ") does not match values size (" + 
+            std::to_string(values.size()) + 
+            ")"
         );
-        
-    } catch (const orgQhull::QhullError& e) {
-        throw std::runtime_error("Failed to create Delaunay triangulation: " + std::string(e.what()));
     }
 }
 
-double LinearNdInterpolator::interpolate(const std::vector<double>& point) const {
-    // Input point dimension check
-    if (point.size() != dimension_) {
-        throw std::invalid_argument("Query point dimension does not match interpolator dimension");
-    }
-    
-    if (num_points_ == 0) {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-    
-    // First check if point exactly matches any input point
-    const double exact_match_tolerance = 1e-15;
-    for (size_t i = 0; i < num_points_; ++i) {
-        bool exact_match = true;
-        for (size_t j = 0; j < dimension_; ++j) {
-            if (std::abs(point[j] - points_[i][j]) > exact_match_tolerance) {
-                exact_match = false;
-                break;
-            }
-        }
-        if (exact_match) {
-            return values_[i];
-        }
-    }
-    
-    try {
-        // Try to find containing simplex
-        orgQhull::QhullFacet facet;
-        if (findContainingSimplex(point, facet)) {
-            // Calculate barycentric coordinates
-            std::vector<double> barycentricCoords = calculateBarycentricCoordinates(point, facet);
-            
-            // Perform linear interpolation
-            return interpolateInSimplex(barycentricCoords, facet);
-        } else {
-            // Point is outside convex hull, use nearest neighbor
-            return findNearestNeighborValue(point);
-        }
-    } catch (const std::exception&) {
-        // If anything goes wrong, fall back to nearest neighbor
-        return findNearestNeighborValue(point);
-    }
-}
-
-double LinearNdInterpolator::findNearestNeighborValue(const std::vector<double>& point) const {
-    size_t nearest_index = 0;
-    double min_distance_sq = std::numeric_limits<double>::max();
-    
-    for (size_t i = 0; i < num_points_; ++i) {
-        double distance_sq = 0.0;
-        for (size_t j = 0; j < dimension_; ++j) {
-            double diff = point[j] - points_[i][j];
-            distance_sq += diff * diff;
-        }
-        
-        if (distance_sq < min_distance_sq) {
-            min_distance_sq = distance_sq;
-            nearest_index = i;
-        }
-    }
-    
-    return values_[nearest_index];
-}
-
-bool LinearNdInterpolator::findContainingSimplex(const std::vector<double>& point, 
-                                                orgQhull::QhullFacet& facet) const {
-    if (!qhull_ || !qhull_->initialized()) {
-        return false;
-    }
-    
-    try {
-        // SciPy-style simplex finding: test all valid facets systematically
-        orgQhull::QhullFacetList facets = qhull_->facetList();
-        
-        for (orgQhull::QhullFacetList::iterator it = facets.begin(); it != facets.end(); ++it) {
-            // Skip bad facets
-            if (!it->isGood()) continue;
-            
-            // Skip upper Delaunay facets (not actual simplices)
-            if (it->isUpperDelaunay()) continue;
-            
-            orgQhull::QhullVertexSet vertices = it->vertices();
-            if (vertices.count() != dimension_ + 1) continue;
-            
-            // Calculate barycentric coordinates
-            std::vector<double> barycentricCoords = calculateBarycentricCoordinates(point, *it);
-            if (barycentricCoords.empty()) continue;
-            
-            // Check if point is inside simplex (SciPy-style)
-            // All barycentric coordinates should be >= 0 and sum to 1
-            bool inside = true;
-            double sum = 0.0;
-            // Use a slightly larger tolerance for edge cases like collinear points
-            const double eps = 10000.0 * std::numeric_limits<double>::epsilon();
-            
-            for (double coord : barycentricCoords) {
-                sum += coord;
-                if (coord < -eps) {  // Allow small negative values due to numerical errors
-                    inside = false;
-                    break;
-                }
-            }
-            
-            // Check if coordinates sum to 1 (within tolerance)
-            if (inside && std::abs(sum - 1.0) < eps) {
-                facet = *it;
-                return true;
-            }
-        }
-        
-    } catch (const std::exception&) {
-        return false;
-    }
-    
-    return false;  // Point is outside convex hull
-}
-
-
-
-std::vector<double> LinearNdInterpolator::calculateBarycentricCoordinates(
-    const std::vector<double>& point, 
-    const orgQhull::QhullFacet& facet) const {
-    
-    std::vector<double> coords;
-    
-    try {
-        // Get vertices of the simplex
-        orgQhull::QhullVertexSet vertices = facet.vertices();
-        size_t num_vertices = vertices.count();
-        
-        if (num_vertices != dimension_ + 1) {
-            return coords;
-        }
-        
-        coords.resize(dimension_ + 1);
-        
-        // SciPy-style barycentric coordinate calculation
-        // Build transformation matrix T where T * lambda = (x - x0)
-        std::vector<std::vector<double>> transform_matrix(dimension_, std::vector<double>(dimension_));
-        std::vector<double> origin(dimension_);
-        
-        // Get first vertex as origin
-        auto vit = vertices.begin();
-        orgQhull::QhullPoint first_vertex = (*vit).point();
-        for (size_t i = 0; i < dimension_; ++i) {
-            origin[i] = first_vertex[static_cast<int>(i)];
-        }
-        
-        // Fill transformation matrix with edge vectors
-        size_t col = 0;
-        ++vit; // Skip first vertex
-        for (; vit != vertices.end() && col < dimension_; ++vit, ++col) {
-            orgQhull::QhullPoint vertex_point = (*vit).point();
-            for (size_t row = 0; row < dimension_; ++row) {
-                transform_matrix[row][col] = vertex_point[static_cast<int>(row)] - origin[row];
-            }
-        }
-        
-        // Solve T * c_partial = (point - origin) for partial coordinates
-        std::vector<double> rhs(dimension_);
-        for (size_t i = 0; i < dimension_; ++i) {
-            rhs[i] = point[i] - origin[i];
-        }
-        
-        std::vector<double> partial_coords = solveLinearSystem(transform_matrix, rhs);
-        if (partial_coords.empty()) {
-            coords.clear();
-            return coords;
-        }
-        
-        // Convert to full barycentric coordinates
-        coords[0] = 1.0;
-        for (size_t i = 0; i < dimension_; ++i) {
-            coords[i + 1] = partial_coords[i];
-            coords[0] -= partial_coords[i];
-        }
-        
-    } catch (const std::exception&) {
-        coords.clear();
-    }
-    
-    return coords;
-}
-
-double LinearNdInterpolator::interpolateInSimplex(const std::vector<double>& barycentricCoords,
-                                                const orgQhull::QhullFacet& facet) const {
-    if (barycentricCoords.empty() || barycentricCoords.size() != dimension_ + 1) {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-    
-    try {
-        // Get vertices and their corresponding values (SciPy-style)
-        orgQhull::QhullVertexSet vertices = facet.vertices();
-        if (vertices.count() != dimension_ + 1) {
-            return std::numeric_limits<double>::quiet_NaN();
-        }
-        
-        double interpolated_value = 0.0;
-        size_t coord_idx = 0;
-        
-        // SciPy-style: out[i,k] = out[i,k] + c[j] * values[m,k]
-        for (orgQhull::QhullVertexSet::iterator vit = vertices.begin(); 
-             vit != vertices.end() && coord_idx < barycentricCoords.size(); 
-             ++vit, ++coord_idx) {
-            
-            // Find the corresponding point index in our original data
-            orgQhull::QhullPoint vertex_point = (*vit).point();
-            size_t point_idx = findPointIndex(vertex_point);
-            
-            if (point_idx < values_.size()) {
-                interpolated_value += barycentricCoords[coord_idx] * values_[point_idx];
-            } else {
-                // This should not happen - invalid vertex reference
-                return std::numeric_limits<double>::quiet_NaN();
-            }
-        }
-        
-        return interpolated_value;
-        
-    } catch (const std::exception&) {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-}
-
-std::vector<double> LinearNdInterpolator::solveLinearSystem(
-    std::vector<std::vector<double>>& matrix, 
-    std::vector<double>& rhs) const {
-    
-    const size_t n = matrix.size();
-    std::vector<double> solution(n);
-    
-    try {
-        // Forward elimination with partial pivoting
-        for (size_t i = 0; i < n; ++i) {
-            // Find pivot
-            size_t pivot_row = i;
-            for (size_t k = i + 1; k < n; ++k) {
-                if (std::abs(matrix[k][i]) > std::abs(matrix[pivot_row][i])) {
-                    pivot_row = k;
-                }
-            }
-            
-            // Swap rows if needed
-            if (pivot_row != i) {
-                std::swap(matrix[i], matrix[pivot_row]);
-                std::swap(rhs[i], rhs[pivot_row]);
-            }
-            
-            // Check for zero pivot (singular matrix)
-            const double pivot = matrix[i][i];
-            // Use a more liberal tolerance for potentially ill-conditioned systems
-            if (std::abs(pivot) < 1000.0 * std::numeric_limits<double>::epsilon()) {
-                return std::vector<double>();  // Return empty on singular matrix
-            }
-            
-            // Eliminate
-            for (size_t k = i + 1; k < n; ++k) {
-                const double factor = matrix[k][i] / pivot;
-                for (size_t j = i; j < n; ++j) {
-                    matrix[k][j] -= factor * matrix[i][j];
-                }
-                rhs[k] -= factor * rhs[i];
-            }
-        }
-        
-        // Back substitution
-        for (int i = static_cast<int>(n) - 1; i >= 0; --i) {
-            solution[i] = rhs[i];
-            for (size_t j = i + 1; j < n; ++j) {
-                solution[i] -= matrix[i][j] * solution[j];
-            }
-            solution[i] /= matrix[i][i];
-        }
-        
-        return solution;
-        
-    } catch (const std::exception&) {
-        return std::vector<double>();  // Return empty on error
-    }
-}
-
-// Helper method to find point index by coordinates
-size_t LinearNdInterpolator::findPointIndex(const orgQhull::QhullPoint& vertex_point) const {
-    // Use a more appropriate tolerance for coordinate matching
-    const double tolerance = 1000.0 * std::numeric_limits<double>::epsilon();
-    
-    for (size_t i = 0; i < num_points_; ++i) {
-        bool match = true;
-        double max_diff = 0.0;
-        
-        for (size_t j = 0; j < dimension_; ++j) {
-            double diff = std::abs(vertex_point[static_cast<int>(j)] - points_[i][j]);
-            max_diff = std::max(max_diff, diff);
-            if (diff > tolerance) {
-                match = false;
-                break;
-            }
-        }
-        
-        if (match) {
-            return i;
-        }
-    }
-    
-    // Debug: Should not happen in normal cases
-    // Return the closest point as fallback
-    size_t closest_idx = 0;
-    double min_distance = std::numeric_limits<double>::max();
-    
-    for (size_t i = 0; i < num_points_; ++i) {
-        double distance = 0.0;
-        for (size_t j = 0; j < dimension_; ++j) {
-            double diff = vertex_point[static_cast<int>(j)] - points_[i][j];
-            distance += diff * diff;
-        }
-        if (distance < min_distance) {
-            min_distance = distance;
-            closest_idx = i;
-        }
-    }
-    
-    return closest_idx;
+void LinearNdInterpolator::setupTriangulation(
+    const std::vector<std::vector<double>> &points)
+{
+    delaunay_ = std::make_unique<Delaunay>(points);
 }
