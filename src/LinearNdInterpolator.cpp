@@ -80,6 +80,9 @@ std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
     // - 数値精度のためのepsilon値
     // - 値の次元数
     
+    // 値の次元数を取得
+    const size_t n_values = values_[0].size();
+    
     // **************************************************
     // 各入力点に対して補間を実行
     // **************************************************
@@ -87,60 +90,73 @@ std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
         // **************************************************
         // 1) 単体（シンプレックス）を見つける
         // **************************************************
+        int isimplex = delaunay_->findSimplex(q);
         
-        // TODO: Qhullを使用して点が含まれる単体を特定
-        // - Delaunay三角分割から単体を検索
-        // - 重心座標を計算
-        // - 単体が見つからない場合（凸包外）は最近傍値を返す
-        
-        // SciPyの実装に基づく構造:
-        // - qhull._find_simplex()を使用して単体を検索
-        // - 重心座標c[]を計算
-        // - isimplex == -1の場合は凸包外
+        // 結果ベクトルを初期化
+        std::vector<double> interpolated_values(n_values, 0.0);
         
         // **************************************************
-        // 2) 線形重心座標補間を実行
+        // 2) 凸包外の処理
         // **************************************************
-        
-        // TODO: 重心座標を使用した線形補間
-        // - 単体の各頂点の値と重心座標の重み付き和を計算
-        // - 複数の値次元がある場合は各次元に対して補間を実行
-        
-        // SciPyの実装に基づく構造:
-        // for (j = 0; j < ndim+1; j++) {
-        //     for (k = 0; k < nvalues; k++) {
-        //         m = simplices[isimplex,j];
-        //         out[i,k] = out[i,k] + c[j] * values[m,k];
-        //     }
-        // }
+        if (isimplex == -1) {
+            // SciPyと同様に、凸包外の場合はNaNを設定
+            for (size_t k = 0; k < n_values; ++k) {
+                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
+            }
+            results.push_back(interpolated_values);
+            continue;
+        }
         
         // **************************************************
-        // 3) 結果を格納
+        // 3) 重心座標を計算
         // **************************************************
+        std::vector<double> barycentric = delaunay_->calculateBarycentricCoordinates(q, isimplex);
         
-        // TODO: 補間結果をresultsに追加
-        // - 値の次元数に応じて適切な形式で格納
-        // - 凸包外の場合はfill_value（NaN）を設定
+        if (barycentric.empty()) {
+            // 重心座標の計算に失敗した場合もNaNを設定
+            for (size_t k = 0; k < n_values; ++k) {
+                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
+            }
+            results.push_back(interpolated_values);
+            continue;
+        }
         
         // **************************************************
-        // 4) エラーハンドリングとfill_valueの処理
+        // 4) 線形重心座標補間を実行
         // **************************************************
+        auto simplices = delaunay_->getSimplices();
+        if (isimplex >= 0 && isimplex < static_cast<int>(simplices.size())) {
+            const auto& simplex = simplices[isimplex];
+            
+            // SciPyの実装に基づく補間計算:
+            // for (j = 0; j < ndim+1; j++) {
+            //     for (k = 0; k < nvalues; k++) {
+            //         m = simplices[isimplex,j];
+            //         out[i,k] = out[i,k] + c[j] * values[m,k];
+            //     }
+            // }
+            
+            for (size_t j = 0; j < barycentric.size() && j < simplex.size(); ++j) {
+                int vertex_index = simplex[j];
+                
+                // 頂点インデックスの範囲チェック
+                if (vertex_index >= 0 && vertex_index < static_cast<int>(values_.size())) {
+                    for (size_t k = 0; k < n_values; ++k) {
+                        interpolated_values[k] += barycentric[j] * values_[vertex_index][k];
+                    }
+                }
+            }
+        } else {
+            // 単体インデックスが無効な場合はNaNを設定
+            for (size_t k = 0; k < n_values; ++k) {
+                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
+            }
+        }
         
-        // TODO: 以下の処理を実装
-        // - 単体が見つからない場合（isimplex == -1）の処理
-        // - 数値精度の問題に対する対処
-        
-        // SciPyの実装に基づく構造:
-        // if (isimplex == -1) {
-        //     // 凸包外の場合はnanを設定
-        //     for (k = 0; k < nvalues; k++) {
-        //         out[i,k] = nan;
-        //     }
-        //     continue;
-        // }
-        
-        // 仮の実装（後で削除）
-        results.push_back(std::vector<double>(values_[0].size(), std::numeric_limits<double>::quiet_NaN()));
+        // **************************************************
+        // 5) 結果を格納
+        // **************************************************
+        results.push_back(interpolated_values);
     }
 
     return results;
