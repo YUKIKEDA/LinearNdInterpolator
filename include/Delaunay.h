@@ -139,7 +139,7 @@ public:
     std::vector<std::vector<int>> getNeighbors() const;
     
     /**
-     * @brief Walking algorithmを使用した効率的なsimplex検索
+     * @brief Walking algorithmを使用した効率的なsimplex検索（SciPy準拠）
      * 
      * SciPyのfind_simplexで使用される効率的な検索アルゴリズムです。
      * 開始simplexから隣接simplexをたどって目標点を含むsimplexを見つけます。
@@ -149,6 +149,17 @@ public:
      * @return 点を含むsimplexのID（見つからない場合は-1）
      */
     int findSimplexWalking(const std::vector<double>& point, int start_simplex = 0) const;
+    
+    /**
+     * @brief Brute Force単体検索（SciPy準拠フォールバック）
+     * 
+     * Walking Algorithmが失敗した場合のフォールバック検索手法です。
+     * 全simplexを順次チェックして点を含むsimplexを見つけます。
+     * 
+     * @param point 検索対象の点の座標
+     * @return 点を含むsimplexのID（見つからない場合は-1）
+     */
+    int findSimplexBruteForce(const std::vector<double>& point) const;
 
 private:
     /**
