@@ -12,6 +12,28 @@
 #include <limits>
 #include <algorithm>
 
+/**
+ * @brief Delaunayクラスのコンストラクタ
+ * 
+ * 与えられた点群からDelaunay三角分割を構築します。
+ * SciPyのspatial.Delaunayと同等の入力検証とエラーハンドリングを提供します。
+ * 
+ * @param points 三角分割する点群。各点はstd::vector<double>として表現され、
+ *               すべての点は同じ次元数を持つ必要があります。
+ *               最低2次元以上で、n次元の場合は最低n+1個の点が必要です。
+ * 
+ * @throws std::invalid_argument 以下の場合に投げられます：
+ *         - 点群が空の場合
+ *         - 点の次元が1未満の場合
+ *         - 次元数に対して点数が不足している場合（n次元でn+1個未満）
+ *         - 点の次元が一貫していない場合
+ *         - 点にNaNや無限大値が含まれている場合
+ * @throws std::runtime_error Qhullライブラリでエラーが発生した場合
+ * 
+ * @note このコンストラクタは内部でQhullライブラリを使用し、
+ *       SciPyと同等のオプション（"d Qbb Qc Qz Q12 Qt"）で三角分割を実行します。
+ *       5次元以上の場合は追加で"Qx"オプションが使用されます。
+ */
 Delaunay::Delaunay(const std::vector<std::vector<double>>& points) {
     // SciPyに基づく入力検証
     if (points.empty()) {
@@ -81,12 +103,32 @@ Delaunay::Delaunay(const std::vector<std::vector<double>>& points) {
     }
 }
 
+/**
+ * @brief Delaunayクラスのデストラクタ
+ * 
+ * リソースの適切な解放を行います。unique_ptrを使用しているため、
+ * Qhullオブジェクトは自動的に解放されます。
+ */
 Delaunay::~Delaunay() = default;
 
-orgQhull::Qhull* Delaunay::getQhull() const {
-    return qhull_.get();
-}
-
+/**
+ * @brief 指定された点を含む単体（simplex）のインデックスを検索
+ * 
+ * 与えられた点がどの単体に含まれるかを判定します。
+ * 重心座標を使用して点が単体内部にあるかを判定し、
+ * SciPyのspatial.Delaunay.find_simplexと同等の機能を提供します。
+ * 
+ * @param point 検索対象の点。三角分割時と同じ次元数である必要があります。
+ * 
+ * @return int 点を含む単体のインデックス（0以上）。
+ *             点が凸包の外部にある場合は-1を返します。
+ *             Qhullが初期化されていない場合も-1を返します。
+ * 
+ * @note このメソッドは重心座標を計算して内部判定を行います。
+ *       数値誤差を考慮して1e-10の許容範囲を設定しています。
+ * 
+ * @see calculateBarycentricCoordinates()
+ */
 int Delaunay::findSimplex(const std::vector<double>& point) const {
     if (!qhull_ || qhull_->qhullStatus() != 0) {
         return -1;
@@ -131,6 +173,29 @@ int Delaunay::findSimplex(const std::vector<double>& point) const {
     return -1; // 凸包外
 }
 
+/**
+ * @brief 指定された点の重心座標を計算
+ * 
+ * 与えられた点について、指定された単体における重心座標を計算します。
+ * 重心座標は点が単体内部にあるかの判定や補間計算に使用されます。
+ * 
+ * 重心座標λ = (λ₀, λ₁, ..., λₙ)は以下の性質を満たします：
+ * - Σλᵢ = 1
+ * - point = Σλᵢ * vertexᵢ
+ * - λᵢ ≥ 0 (すべてのi) の場合、点は単体内部にある
+ * 
+ * @param point 重心座標を計算する点
+ * @param simplex_id 対象となる単体のインデックス
+ * 
+ * @return std::vector<double> 重心座標のベクトル。
+ *         サイズは次元数+1で、各要素が対応する頂点への重みを表します。
+ *         計算に失敗した場合（不正なsimplex_idや特異行列など）は空のベクトルを返します。
+ * 
+ * @note 計算は線形システム A * λ = b を解くことで実行されます。
+ *       ここで、Aは頂点差分行列、bは点と基準頂点の差分ベクトルです。
+ * 
+ * @see solveLinearSystem(), findSimplex()
+ */
 std::vector<double> Delaunay::calculateBarycentricCoordinates(
     const std::vector<double>& point, int simplex_id) const {
     
@@ -199,6 +264,27 @@ std::vector<double> Delaunay::calculateBarycentricCoordinates(
     return barycentric;
 }
 
+/**
+ * @brief 三角分割の全単体を取得
+ * 
+ * Delaunay三角分割によって生成されたすべての単体（シンプレックス）を取得します。
+ * 各単体は元の点群のインデックスで表現されます。
+ * 
+ * n次元空間では、各単体はn+1個の頂点を持ちます：
+ * - 2次元：三角形（3頂点）
+ * - 3次元：四面体（4頂点）
+ * - n次元：n+1頂点
+ * 
+ * @return std::vector<std::vector<int>> 単体のリスト。
+ *         各内側のベクトルは1つの単体を表し、元の点群のインデックスを含みます。
+ *         Qhullが初期化されていない場合は空のベクトルを返します。
+ * 
+ * @note このメソッドはQhullの上半分Delaunay面を除外し、
+ *       有効な下半分の面のみを返します。
+ *       頂点座標の照合には1e-12の許容範囲を使用しています。
+ * 
+ * @see findSimplex(), calculateBarycentricCoordinates()
+ */
 std::vector<std::vector<int>> Delaunay::getSimplices() const {
     std::vector<std::vector<int>> simplices;
     
@@ -253,7 +339,30 @@ std::vector<std::vector<int>> Delaunay::getSimplices() const {
     return simplices;
 }
 
-// ヘルパーメソッド: 線形システムを解く
+/**
+ * @brief 線形システム Ax = b を解く
+ * 
+ * ガウス消去法を使用して線形システムを解きます。
+ * 重心座標の計算において、頂点差分行列と点差分ベクトルから
+ * 重心座標の係数を求めるために使用されます。
+ * 
+ * アルゴリズム：
+ * 1. 部分ピボット選択付きガウス消去法で前進消去
+ * 2. 後退代入で解を求める
+ * 3. 特異行列の場合は零ベクトルを返す
+ * 
+ * @param A 係数行列（n×n）。このメソッド内で変更されません。
+ * @param b 右辺ベクトル（長さn）
+ * 
+ * @return std::vector<double> 解ベクトル x。
+ *         行列が特異または不正な場合は零ベクトルを返します。
+ * 
+ * @note 数値安定性のため部分ピボット選択を使用し、
+ *       1e-12未満の要素は特異とみなします。
+ *       この許容値は重心座標計算の精度要件に基づいています。
+ * 
+ * @see calculateBarycentricCoordinates()
+ */
 std::vector<double> Delaunay::solveLinearSystem(
     const std::vector<std::vector<double>>& A, 
     const std::vector<double>& b) const {

@@ -6,6 +6,22 @@
 #include <iostream>
 #include <string>
 
+/**
+ * @brief N次元線形補間器のコンストラクタ（多次元値用）
+ * 
+ * 与えられた補間点座標と対応する多次元値を使用してN次元線形補間器を初期化します。
+ * 内部でドロネー三角分割を構築し、線形重心座標補間による高速な補間を可能にします。
+ * 
+ * @param points 補間点座標の配列。各要素は点の座標を表すベクトル（最低2次元）
+ * @param values 各補間点に対応する値の配列。各要素は多次元値を表すベクトル
+ * 
+ * @throws std::invalid_argument 以下の場合に例外が発生します：
+ *   - points と values のサイズが一致しない
+ *   - 点の次元数が2未満
+ *   - 全ての点の次元が一致しない
+ *   - 全ての値の次元が一致しない
+ *   - points または values が空
+ */
 LinearNdInterpolator::LinearNdInterpolator(
     const std::vector<std::vector<double>>& points, 
     const std::vector<std::vector<double>>& values) {
@@ -14,6 +30,21 @@ LinearNdInterpolator::LinearNdInterpolator(
     initialize(points, values);
 }
 
+/**
+ * @brief N次元線形補間器のコンストラクタ（1次元値用）
+ * 
+ * 与えられた補間点座標と対応する1次元スカラー値を使用してN次元線形補間器を初期化します。
+ * 1次元値は内部で2次元形式に変換されてから処理されます。
+ * 
+ * @param points 補間点座標の配列。各要素は点の座標を表すベクトル（最低2次元）
+ * @param values 各補間点に対応するスカラー値の配列
+ * 
+ * @throws std::invalid_argument 以下の場合に例外が発生します：
+ *   - points と values のサイズが一致しない
+ *   - 点の次元数が2未満
+ *   - 全ての点の次元が一致しない
+ *   - points または values が空
+ */
 LinearNdInterpolator::LinearNdInterpolator(
     const std::vector<std::vector<double>>& points, 
     const std::vector<double>& values) {
@@ -28,16 +59,50 @@ LinearNdInterpolator::LinearNdInterpolator(
     initialize(points, values2d);
 }
 
+/**
+ * @brief N次元線形補間器のデストラクタ
+ * 
+ * オブジェクトの破棄時にリソースのクリーンアップを行います。
+ * 現在はQhullのリソース解放処理は自動的に行われます。
+ */
 LinearNdInterpolator::~LinearNdInterpolator() {
-    // Smart pointer handles cleanup automatically
+    // Qhullのリソースを解放
 }
 
+/**
+ * @brief 補間器の初期化処理
+ * 
+ * 与えられた補間点座標と値を使用して補間器を初期化します。
+ * 入力データの妥当性を検証し、メンバ変数に格納後、ドロネー三角分割を構築します。
+ * 
+ * @param points 補間点座標の配列。各要素は点の座標を表すベクトル
+ * @param values 各補間点に対応する値の配列。各要素は値を表すベクトル
+ * 
+ * @throws std::invalid_argument 以下の場合に例外が発生します：
+ *   - points と values のサイズが不一致
+ *   - 点の次元数が2未満
+ *   - 点の次元に一貫性がない
+ *   - 値の次元に一貫性がない
+ *   - points または values が空
+ */
 void LinearNdInterpolator::initialize(
     const std::vector<std::vector<double>> &points, 
     const std::vector<std::vector<double>> &values)
 {
+    // **************************************************
     // 入力値のバリデーション
-    throwifInvalidInputDataShape(points, values);
+    // **************************************************
+
+    // 補間点座標と値の数が一致しない場合はエラー
+    if (points.size() != values.size()) {
+        throw std::invalid_argument(
+            "Points size (" + 
+            std::to_string(points.size()) + 
+            ") does not match values size (" + 
+            std::to_string(values.size()) + 
+            ")"
+        );
+    }
 
     // 補間点座標と値が空の場合はエラー
     if (points.empty() || values.empty()) {
@@ -65,6 +130,8 @@ void LinearNdInterpolator::initialize(
         }
     }
 
+    // **************************************************
+
     // 補間点座標と値をメンバ変数に格納
     points_ = points;
     values_ = values;
@@ -73,28 +140,38 @@ void LinearNdInterpolator::initialize(
     setupTriangulation(points);
 }
 
-void LinearNdInterpolator::throwifInvalidInputDataShape(
-    const std::vector<std::vector<double>> &points,
-    const std::vector<std::vector<double>> &values) const
-{
-    // 補間点座標と値の数が一致しない場合はエラー
-    if (points.size() != values.size()) {
-        throw std::invalid_argument(
-            "Points size (" + 
-            std::to_string(points.size()) + 
-            ") does not match values size (" + 
-            std::to_string(values.size()) + 
-            ")"
-        );
-    }
-}
-
+/**
+ * @brief ドロネー三角分割の設定
+ * 
+ * 与えられた補間点座標を使用してドロネー三角分割を構築します。
+ * 構築されたDelaunayオブジェクトは線形補間の基盤として使用されます。
+ * 
+ * @param points 補間点座標の配列。各要素は点の座標を表すベクトル
+ */
 void LinearNdInterpolator::setupTriangulation(
     const std::vector<std::vector<double>> &points)
 {
     delaunay_ = std::make_unique<Delaunay>(points);
 }
 
+/**
+ * @brief 複数点に対する線形補間
+ * 
+ * 与えられた複数のクエリ点に対して線形補間を実行し、補間値を返します。
+ * ドロネー三角分割と重心座標を使用した線形補間により、SciPyと互換性のある結果を提供します。
+ * 
+ * @param query 補間対象の点座標の配列。各要素は点の座標を表すベクトル
+ * 
+ * @return 各クエリ点に対応する補間値の配列。各要素は補間値を表すベクトル
+ *         凸包外の点についてはNaN値が設定されます
+ * 
+ * @throws std::invalid_argument クエリ点の次元が補間点の次元と一致しない場合
+ * 
+ * @note 
+ *   - 空のクエリが渡された場合は空の結果配列を返します
+ *   - 凸包外の点や計算に失敗した点についてはNaN値が設定されます
+ *   - SciPyのLinearNDInterpolatorと同等の動作を提供します
+ */
 std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
     const std::vector<std::vector<double>> &query) const
 {    
@@ -183,6 +260,16 @@ std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
     return results;
 }
 
+/**
+ * @brief 単一点に対する線形補間（スカラー値用）
+ * 
+ * 与えられた単一のクエリ点に対して線形補間を実行し、スカラー補間値を返します。
+ * 内部で複数点版のinterpolateメソッドを呼び出し、結果の最初の値を返します。
+ * 
+ * @param query_point 補間対象の点座標
+ * 
+ * @return 補間されたスカラー値。計算に失敗した場合やクエリ点が凸包外の場合はNaNを返します
+ */
 double LinearNdInterpolator::interpolate(const std::vector<double>& query_point) const {
     // 単一点を複数点形式に変換
     std::vector<std::vector<double>> query = {query_point};

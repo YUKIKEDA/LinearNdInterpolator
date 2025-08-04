@@ -231,7 +231,7 @@ def main():
         test_cases = reference_data.get('test_cases', [])
         total_queries = sum(len(tc.get('queries', [])) for tc in test_cases)
         
-        print(f"\\nStatistics:")
+        print("\\nStatistics:")
         print(f"- Test cases: {len(test_cases)}")
         print(f"- Total queries: {total_queries}")
         
@@ -244,9 +244,9 @@ def main():
         
         print(f"- Dimensions: {sorted(dimensions)}")
         
-        print(f"\\nNext steps:")
-        print(f"1. Add the generated test file to CMakeLists.txt")
-        print(f"2. Build and run tests with: cmake --build build && ctest")
+        print("\\nNext steps:")
+        print("1. Add the generated test file to CMakeLists.txt")
+        print("2. Build and run tests with: cmake --build build && ctest")
         
         return 0
     else:
