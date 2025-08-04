@@ -12,6 +12,7 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
+#include <map>
 
 /**
  * @brief Delaunayクラスのコンストラクタ
@@ -148,7 +149,7 @@ int Delaunay::findSimplex(const std::vector<double>& point) const {
     if (num_simplices > 50) {  // 50個以上の単体がある場合
         int result = findSimplexWalking(point, 0);
         if (result != -1) {
-            return result;
+            return result;  // Walking Algorithm成功
         }
         // Walking Algorithmで見つからない場合は線形探索にフォールバック
     }
@@ -670,23 +671,80 @@ void Delaunay::computeNeighbors() const {
         return;
     }
     
-    // 簡易版実装: すべてのsimplexに対して空の隣接リストを作成
-    // より正確な実装は将来の改善で対応
-    auto facetList = qhull_->facetList();
     neighbors_.clear();
+    const size_t ndim = points_.empty() ? 0 : points_[0].size();
     
-    int simplex_count = 0;
+    // SciPy準拠：QhullのfacetListから隣接関係を取得
+    auto facetList = qhull_->facetList();
+    
+    // 有効なfacet（下半分）のマッピング作成
+    std::vector<orgQhull::QhullFacet> valid_facets;
+    std::map<int, int> facet_id_to_index;
+    
+    int index = 0;
     for (auto facet : facetList) {
         if (facet.isUpperDelaunay()) {
-            continue;
+            continue;  // 上半分は除外（SciPy準拠）
         }
-        simplex_count++;
+        valid_facets.push_back(facet);
+        facet_id_to_index[facet.id()] = index;
+        index++;
     }
     
-    // 各simplexに対して隣接情報をダミーで初期化
-    // Walking Algorithmを無効化する（線形探索にフォールバック）
-    for (int i = 0; i < simplex_count; ++i) {
-        neighbors_.push_back(std::vector<int>());
+    // 隣接配列を初期化
+    neighbors_.resize(valid_facets.size());
+    for (size_t i = 0; i < neighbors_.size(); ++i) {
+        neighbors_[i].resize(ndim + 1, -1);  // -1は境界を示す（SciPy準拠）
+    }
+    
+    // SciPyの実装に基づく隣接関係計算
+    // 「The kth neighbor is opposite to the kth vertex」の原則に従う
+    for (size_t i = 0; i < valid_facets.size(); ++i) {
+        const auto& facet = valid_facets[i];
+        auto vertices = facet.vertices();
+        
+        // 各頂点に対応する隣接facetを検索
+        int vertex_index = 0;
+        for (auto vertex : vertices) {
+            if (vertex_index >= static_cast<int>(neighbors_[i].size())) break;
+            
+            // この頂点を含まない隣接facetを探す（SciPy方式）
+            // 暫定実装：全facetを検索して隣接を判定
+            for (size_t j = 0; j < valid_facets.size(); ++j) {
+                if (i == j) continue;
+                
+                const auto& other_facet = valid_facets[j];
+                auto other_vertices = other_facet.vertices();
+                
+                // この頂点を共有せず、他のn個の頂点を共有するfacetが隣接
+                int shared_count = 0;
+                bool shares_current_vertex = false;
+                
+                for (auto other_vertex : other_vertices) {
+                    if (vertex.id() == other_vertex.id()) {
+                        shares_current_vertex = true;
+                        break;
+                    }
+                    
+                    // 他の頂点との共有をチェック
+                    for (auto check_vertex : vertices) {
+                        if (check_vertex.id() != vertex.id() && 
+                            check_vertex.id() == other_vertex.id()) {
+                            shared_count++;
+                            break;
+                        }
+                    }
+                }
+                
+                // n個の頂点を共有し、対象頂点を共有しない場合が隣接
+                if (!shares_current_vertex && shared_count == static_cast<int>(ndim)) {
+                    neighbors_[i][vertex_index] = static_cast<int>(j);
+                    break;
+                }
+            }
+            
+            vertex_index++;
+        }
     }
     
     neighbors_computed_ = true;
@@ -711,8 +769,8 @@ int Delaunay::findSimplexWalking(const std::vector<double>& point, int start_sim
     }
     
     for (int iteration = 0; iteration < max_iterations; ++iteration) {
-        // 現在のsimplexで重心座標を計算
-        std::vector<double> barycentric = calculateBarycentricCoordinates(point, current_simplex);
+        // 変換行列を使った高速重心座標計算（SciPy同等）
+        std::vector<double> barycentric = calculateBarycentricCoordinatesWithTransform(point, current_simplex);
         
         if (barycentric.empty()) {
             return -1;  // 計算失敗
@@ -743,12 +801,16 @@ int Delaunay::findSimplexWalking(const std::vector<double>& point, int start_sim
             int next_simplex = neighbors_[current_simplex][most_negative_idx];
             
             if (next_simplex == -1 || next_simplex == current_simplex) {
-                break;  // 境界または同じsimplex
+                break;  // 境界または同じsimplex（凸包外）
             }
             
-            current_simplex = next_simplex;
+            if (next_simplex >= 0 && next_simplex < static_cast<int>(neighbors_.size())) {
+                current_simplex = next_simplex;
+            } else {
+                break;  // 無効なsimplex index
+            }
         } else {
-            break;  // 隣接情報が無効
+            break;  // 隣接情報が無効または範囲外
         }
     }
     
