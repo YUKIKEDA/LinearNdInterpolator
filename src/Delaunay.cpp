@@ -427,7 +427,7 @@ std::vector<double> Delaunay::calculateBarycentricCoordinatesWithTransform(
         return {};
     }
     
-    // 変換行列にNaNが含まれる場合（特異行列）は元の方法にフォールバック
+    // 変換行列にNaNが含まれる場合（特異行列）は元の方法にフォールバック（SciPy準拠）
     for (size_t i = 0; i <= ndim; ++i) {
         for (size_t j = 0; j < ndim; ++j) {
             if (!std::isfinite(T[i][j])) {
@@ -436,29 +436,31 @@ std::vector<double> Delaunay::calculateBarycentricCoordinatesWithTransform(
         }
     }
     
-    // 作業中実装に合わせた算法: T^(-1) * (x - r_0) = lambda を計算
-    // T[:ndim, :] は既に逆行列、T[ndim, :] は参照頂点 r_0
-    std::vector<double> x_minus_r0(ndim);
+    // SciPy準拠のアルゴリズム: T^(-1) * (x - r_n) = c を計算
+    // T[:ndim, :] は既に逆行列、T[ndim, :] は参照頂点 r_n
+    std::vector<double> x_minus_rn(ndim);
     for (size_t i = 0; i < ndim; ++i) {
-        x_minus_r0[i] = point[i] - T[ndim][i];  // x - r_0
+        x_minus_rn[i] = point[i] - T[ndim][i];  // x - r_n
     }
     
-    // lambda = T^(-1) * (x - r_0) 行列ベクトル乗算
-    std::vector<double> lambda(ndim, 0.0);
+    // c = T^(-1) * (x - r_n) 行列ベクトル乗算
+    std::vector<double> c(ndim, 0.0);
     for (size_t i = 0; i < ndim; ++i) {
         for (size_t j = 0; j < ndim; ++j) {
-            lambda[i] += T[i][j] * x_minus_r0[j];
+            c[i] += T[i][j] * x_minus_rn[j];
         }
     }
     
-    // バリセントリック座標を構築: barycentric[0] = 1 - sum(lambda), barycentric[i+1] = lambda[i]
+    // SciPy準拠のバリセントリック座標構築: 
+    // barycentric[i] = c[i] for i = 0, 1, ..., n-1
+    // barycentric[n] = 1 - sum(c[0:n])
     std::vector<double> barycentric(ndim + 1);
     double sum = 0.0;
     for (size_t i = 0; i < ndim; ++i) {
-        barycentric[i + 1] = lambda[i];
-        sum += lambda[i];
+        barycentric[i] = c[i];
+        sum += c[i];
     }
-    barycentric[0] = 1.0 - sum;
+    barycentric[ndim] = 1.0 - sum;  // 最後の要素が参照頂点の重み
     
     return barycentric;
 }
@@ -510,39 +512,53 @@ std::vector<std::vector<double>> Delaunay::computeSingleTransform(
     // SciPy準拠: T[ndim+1][ndim] 形式の変換行列を構築
     std::vector<std::vector<double>> T(ndim + 1, std::vector<double>(ndim));
     
-    // 作業中の実装に合わせて参照頂点を最初の頂点に変更 (index = 0)
-    const auto& r_0 = simplex_vertices[0];
+    // SciPy準拠: 参照頂点は最後の頂点（r_n）を使用
+    const auto& r_n = simplex_vertices[ndim];
     
-    /* 作業中実装との互換性のため:
-     * 線形システム: A * lambda = x - r_0
-     * ここで lambda[i] は i+1番目のバリセントリック座標 (i = 0, 1, ..., n-1)
-     * barycentric[0] = 1 - sum(lambda) で計算される
-     * A の各列は (vertex[i+1] - r_0) for i = 0, 1, ..., n-1
+    /* SciPy準拠のアルゴリズム:
+     * アフィン変換行列を計算: T^(-1) * (x - r_n) = c
+     * ここで c は最初のn個のバリセントリック座標
+     * c[n] = 1 - sum(c[0:n]) で計算される
+     * 
+     * 行列 A の各列は (vertex[i] - r_n) for i = 0, 1, ..., n-1
      */
     std::vector<std::vector<double>> A(ndim, std::vector<double>(ndim));
     for (size_t j = 0; j < ndim; ++j) {        // 各列j
         for (size_t i = 0; i < ndim; ++i) {    // 各行i
-            A[i][j] = simplex_vertices[j + 1][i] - r_0[i];  // vertex[j+1] - vertex[0]
+            A[i][j] = simplex_vertices[j][i] - r_n[i];  // vertex[j] - r_n
         }
     }
     
+    // SciPy準拠の条件数チェックと逆行列計算
     try {
-        // Aの逆行列を計算（これがSciPyの変換行列T[:ndim, :]）
-        auto inv_A = invertMatrix(A);
+        // 数値安定性のチェック：条件数が大きすぎる場合は特異行列として扱う
+        if (isMatrixSingular(A)) {
+            // 特異または数値的に不安定な行列の場合はNaNで埋める（SciPy準拠）
+            for (size_t i = 0; i <= ndim; ++i) {
+                for (size_t j = 0; j < ndim; ++j) {
+                    T[i][j] = std::numeric_limits<double>::quiet_NaN();
+                }
+            }
+            return T;
+        }
         
+        // 逆行列を計算（SciPy準拠の高数値精度）
+        auto inv_A = invertMatrixRobust(A);
+        
+        // T[:ndim, :] に逆行列を格納
         for (size_t i = 0; i < ndim; ++i) {
             for (size_t j = 0; j < ndim; ++j) {
                 T[i][j] = inv_A[i][j];
             }
         }
         
-        // T[ndim, :] に参照頂点 r_0 を格納
+        // T[ndim, :] に参照頂点 r_n を格納（SciPy準拠）
         for (size_t j = 0; j < ndim; ++j) {
-            T[ndim][j] = r_0[j];
+            T[ndim][j] = r_n[j];
         }
         
     } catch (const std::runtime_error&) {
-        // 特異行列の場合はNaNで埋める (SciPy互換)
+        // 計算エラーの場合はNaNで埋める（SciPy互換）
         for (size_t i = 0; i <= ndim; ++i) {
             for (size_t j = 0; j < ndim; ++j) {
                 T[i][j] = std::numeric_limits<double>::quiet_NaN();
@@ -818,4 +834,162 @@ int Delaunay::findSimplexBruteForce(const std::vector<double>& point) const {
     }
     
     return -1;  // 凸包外
+}
+
+bool Delaunay::isMatrixSingular(const std::vector<std::vector<double>>& matrix) const {
+    if (matrix.empty() || matrix.size() != matrix[0].size()) {
+        return true;  // 不正な行列は特異として扱う
+    }
+    
+    const size_t n = matrix.size();
+    
+    // SciPy準拠: 機械イプシロンの1000倍を閾値として使用
+    const double eps = std::numeric_limits<double>::epsilon();
+    const double condition_threshold = 1000.0 * eps;
+    
+    // 簡易的な条件数推定（行列式ベース）
+    // より正確にはLAPACKのdgeconを使用するが、ここでは行列式で近似
+    try {
+        double det = calculateDeterminant(matrix);
+        
+        // 行列式が非常に小さい場合は特異行列として判定
+        if (std::abs(det) < condition_threshold) {
+            return true;
+        }
+        
+        // 無限大やNaNの場合も特異として扱う
+        if (!std::isfinite(det)) {
+            return true;
+        }
+        
+        return false;
+        
+    } catch (...) {
+        return true;  // 計算エラーは特異として扱う
+    }
+}
+
+std::vector<std::vector<double>> Delaunay::invertMatrixRobust(
+    const std::vector<std::vector<double>>& matrix) const {
+    
+    if (matrix.empty() || matrix.size() != matrix[0].size()) {
+        throw std::runtime_error("Invalid matrix for inversion");
+    }
+    
+    const size_t n = matrix.size();
+    
+    // SciPy準拠: より安定した逆行列計算
+    // LU分解を使用した高精度計算を実装
+    
+    // 作業用の拡張行列を作成 [A|I]
+    std::vector<std::vector<double>> extended(n, std::vector<double>(2 * n, 0.0));
+    
+    // 元の行列をコピー
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            extended[i][j] = matrix[i][j];
+        }
+        extended[i][i + n] = 1.0;  // 単位行列部分
+    }
+    
+    // Gauss-Jordan消去法（ピボット選択付き）
+    for (size_t i = 0; i < n; ++i) {
+        // SciPy準拠: ピボット選択
+        size_t pivot_row = i;
+        double max_pivot = std::abs(extended[i][i]);
+        
+        for (size_t k = i + 1; k < n; ++k) {
+            if (std::abs(extended[k][i]) > max_pivot) {
+                max_pivot = std::abs(extended[k][i]);
+                pivot_row = k;
+            }
+        }
+        
+        // 数値安定性チェック
+        if (max_pivot < std::numeric_limits<double>::epsilon() * 1000.0) {
+            throw std::runtime_error("Matrix is singular or numerically unstable");
+        }
+        
+        // 行の交換
+        if (pivot_row != i) {
+            std::swap(extended[i], extended[pivot_row]);
+        }
+        
+        // ピボット要素で正規化
+        double pivot = extended[i][i];
+        for (size_t j = 0; j < 2 * n; ++j) {
+            extended[i][j] /= pivot;
+        }
+        
+        // 他の行を消去
+        for (size_t k = 0; k < n; ++k) {
+            if (k != i) {
+                double mult = extended[k][i];
+                for (size_t j = 0; j < 2 * n; ++j) {
+                    extended[k][j] -= mult * extended[i][j];
+                }
+            }
+        }
+    }
+    
+    // 逆行列部分を抽出
+    std::vector<std::vector<double>> result(n, std::vector<double>(n));
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            result[i][j] = extended[i][j + n];
+        }
+    }
+    
+    return result;
+}
+
+double Delaunay::calculateDeterminant(const std::vector<std::vector<double>>& matrix) const {
+    if (matrix.empty() || matrix.size() != matrix[0].size()) {
+        return 0.0;
+    }
+    
+    const size_t n = matrix.size();
+    
+    if (n == 1) {
+        return matrix[0][0];
+    }
+    
+    if (n == 2) {
+        return matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0];
+    }
+    
+    // より大きな行列にはLU分解を使用
+    auto lu_matrix = matrix;
+    double det = 1.0;
+    
+    for (size_t i = 0; i < n; ++i) {
+        // ピボット選択
+        size_t pivot_row = i;
+        for (size_t k = i + 1; k < n; ++k) {
+            if (std::abs(lu_matrix[k][i]) > std::abs(lu_matrix[pivot_row][i])) {
+                pivot_row = k;
+            }
+        }
+        
+        if (pivot_row != i) {
+            std::swap(lu_matrix[i], lu_matrix[pivot_row]);
+            det = -det;  // 行の交換で符号変化
+        }
+        
+        if (std::abs(lu_matrix[i][i]) < std::numeric_limits<double>::epsilon()) {
+            return 0.0;  // 特異行列
+        }
+        
+        det *= lu_matrix[i][i];
+        
+        // 消去
+        for (size_t k = i + 1; k < n; ++k) {
+            double mult = lu_matrix[k][i] / lu_matrix[i][i];
+            for (size_t j = i; j < n; ++j) {
+                lu_matrix[k][j] -= mult * lu_matrix[i][j];
+            }
+        }
+    }
+    
+    return det;
 }

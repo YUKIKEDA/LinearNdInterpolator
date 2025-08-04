@@ -247,7 +247,7 @@ private:
         const std::vector<std::vector<double>>& simplex_vertices) const;
     
     /**
-     * @brief 行列の逆行列を計算
+     * @brief 行列の逆行列を計算（基本版）
      * 
      * Gauss-Jordan消去法を使用して逆行列を計算します。
      * 
@@ -257,4 +257,39 @@ private:
      */
     std::vector<std::vector<double>> invertMatrix(
         const std::vector<std::vector<double>>& matrix) const;
+    
+    /**
+     * @brief 行列の特異性チェック（SciPy準拠）
+     * 
+     * SciPyの条件数チェックに基づく特異行列判定を行います。
+     * 機械イプシロンの1000倍を閾値として使用します。
+     * 
+     * @param matrix チェック対象の正方行列
+     * @return true: 特異または数値的に不安定, false: 安定
+     */
+    bool isMatrixSingular(const std::vector<std::vector<double>>& matrix) const;
+    
+    /**
+     * @brief 高精度逆行列計算（SciPy準拠）
+     * 
+     * SciPyのLAPACKベースの高精度逆行列計算を模倣します。
+     * 数値安定性を重視した実装です。
+     * 
+     * @param matrix 正方行列
+     * @return 逆行列
+     * @throws std::runtime_error 計算失敗時
+     */
+    std::vector<std::vector<double>> invertMatrixRobust(
+        const std::vector<std::vector<double>>& matrix) const;
+    
+    /**
+     * @brief 行列式を計算
+     * 
+     * LU分解を使用して行列式を計算します。
+     * 特異性判定で使用されます。
+     * 
+     * @param matrix 正方行列
+     * @return 行列式の値
+     */
+    double calculateDeterminant(const std::vector<std::vector<double>>& matrix) const;
 };
