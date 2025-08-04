@@ -185,11 +185,11 @@ std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
     for (const auto& q : query) {
         if (q.size() != expected_dimension) {
             throw std::invalid_argument(
-                "Input points dimension (" + 
-                std::to_string(q.size()) + 
-                ") does not match expected dimension (" + 
-                std::to_string(expected_dimension) + 
-                ")"
+                "Input points dimension (" 
+                + std::to_string(q.size()) 
+                + ") does not match expected dimension (" 
+                + std::to_string(expected_dimension) 
+                + ")"
             );
         }
     }

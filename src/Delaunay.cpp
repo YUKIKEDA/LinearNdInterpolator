@@ -35,11 +35,12 @@
  *       5次元以上の場合は追加で"Qx"オプションが使用されます。
  */
 Delaunay::Delaunay(const std::vector<std::vector<double>>& points) {
-    // SciPyに基づく入力検証
+    // 入力点が空の場合はエラー
     if (points.empty()) {
         throw std::invalid_argument("Input points cannot be empty.");
     }
     
+    // 入力点の次元数が1未満の場合はエラー
     if (points[0].empty()) {
         throw std::invalid_argument("Input points must have at least one dimension.");
     }
@@ -47,7 +48,7 @@ Delaunay::Delaunay(const std::vector<std::vector<double>>& points) {
     const size_t n_points = points.size();
     const size_t n_dims = points[0].size();
     
-    // 最小次元数の確認（SciPyでは2次元以上が必要）
+    // 最小次元数の確認（三角形を作るためには最低2次元以上必要）
     if (n_dims < 2) {
         throw std::invalid_argument("Points must have at least 2 dimensions for triangulation.");
     }
@@ -55,8 +56,11 @@ Delaunay::Delaunay(const std::vector<std::vector<double>>& points) {
     // 最小点数の確認（n次元では最低n+1個の点が必要）
     if (n_points < n_dims + 1) {
         throw std::invalid_argument(
-            "Need at least " + std::to_string(n_dims + 1) + 
-            " points for " + std::to_string(n_dims) + "-dimensional triangulation.");
+            "Need at least " 
+            + std::to_string(n_dims + 1) 
+            + " points for " 
+            + std::to_string(n_dims) 
+            + "-dimensional triangulation.");
     }
     
     // 次元の一貫性とNaN/無限大値のチェック
