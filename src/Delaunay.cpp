@@ -1,4 +1,4 @@
-#include "Delaunay.h"
+﻿#include "Delaunay.h"
 #include "libqhullcpp/Qhull.h"
 #include "libqhullcpp/QhullError.h"
 #include "libqhullcpp/QhullFacet.h"
@@ -50,7 +50,8 @@ Delaunay::Delaunay(const std::vector<std::vector<double>>& points) {
         }
     }
 
-    // 点データを平坦化
+    // 点データを平坦化し、内部で保持
+    points_ = points;
     std::vector<double> flat_points(n_points * n_dims);
     for (size_t i = 0; i < n_points; ++i) {
         for (size_t j = 0; j < n_dims; ++j) {
@@ -59,12 +60,12 @@ Delaunay::Delaunay(const std::vector<std::vector<double>>& points) {
     }
 
     // SciPyと同等のQhullオプション設定
-    std::string options = "Qbb Qc Qz Q12";
+    // d: Delaunay三角分割, Qbb: バウンディングボックス計算, Qc: 共面点保持
+    // Qz: 無限遠点を追加（共円・共球問題対応）, Q12: 広角を許可, Qt: 三角分割出力
+    std::string options = "d Qbb Qc Qz Q12 Qt";
     if (n_dims >= 5) {
         options += " Qx";
     }
-    // Qt（三角分割出力）オプションを追加
-    options += " Qt";
 
     try {
         qhull_ = std::make_unique<orgQhull::Qhull>();
@@ -140,56 +141,60 @@ std::vector<double> Delaunay::calculateBarycentricCoordinates(
     const size_t n_dims = point.size();
     std::vector<double> barycentric(n_dims + 1, 0.0);
     
-    auto facetList = qhull_->facetList();
-    int current_id = 0;
+    // Get the specific simplex vertices
+    auto simplices = getSimplices();
+    if (simplex_id < 0 || simplex_id >= static_cast<int>(simplices.size())) {
+        return {};
+    }
     
-    for (auto facet : facetList) {
-        if (facet.isUpperDelaunay()) {
-            continue;
+    const auto& simplex = simplices[simplex_id];
+    if (simplex.size() != n_dims + 1) {
+        return {};
+    }
+    
+    // Build the transformation matrix A and vector b
+    // A * lambda = point - vertex[0], where lambda are the last n_dims barycentric coordinates
+    std::vector<std::vector<double>> A(n_dims, std::vector<double>(n_dims));
+    std::vector<double> b(n_dims);
+    
+    // Use first vertex as origin
+    int first_vertex_idx = simplex[0];
+    if (first_vertex_idx < 0 || first_vertex_idx >= static_cast<int>(points_.size())) {
+        return {};
+    }
+    
+    const auto& first_vertex = points_[first_vertex_idx];
+    
+    // Build matrix A: columns are (vertex[i] - vertex[0]) for i = 1, 2, ..., n_dims
+    for (size_t i = 0; i < n_dims; ++i) {
+        int vertex_idx = simplex[i + 1];
+        if (vertex_idx < 0 || vertex_idx >= static_cast<int>(points_.size())) {
+            return {};
         }
         
-        if (current_id == simplex_id) {
-            auto vertices = facet.vertices();
-            
-            if (vertices.size() == n_dims + 1) {
-                // 線形システムを解いて重心座標を計算
-                // Ax = b の形で、A は (n_dims x n_dims) 行列
-                std::vector<std::vector<double>> A(n_dims, std::vector<double>(n_dims));
-                std::vector<double> b(n_dims);
-                
-                auto vertex_iter = vertices.begin();
-                auto first_vertex = *vertex_iter;
-                ++vertex_iter;
-                
-                // 最初の頂点を基準にして相対座標を計算
-                for (size_t i = 0; i < n_dims; ++i) {
-                    auto vertex = *vertex_iter;
-                    for (size_t j = 0; j < n_dims; ++j) {
-                        A[j][i] = vertex.point()[j] - first_vertex.point()[j];
-                    }
-                    ++vertex_iter;
-                }
-                
-                // 右辺ベクトル b を設定
-                for (size_t j = 0; j < n_dims; ++j) {
-                    b[j] = point[j] - first_vertex.point()[j];
-                }
-                
-                // ガウス消去法で解く（簡単な実装）
-                std::vector<double> solution = solveLinearSystem(A, b);
-                
-                // 重心座標を設定
-                double sum = 0.0;
-                for (size_t i = 0; i < n_dims; ++i) {
-                    barycentric[i + 1] = solution[i];
-                    sum += solution[i];
-                }
-                barycentric[0] = 1.0 - sum;
-            }
-            break;
+        const auto& vertex = points_[vertex_idx];
+        for (size_t j = 0; j < n_dims; ++j) {
+            A[j][i] = vertex[j] - first_vertex[j];
         }
-        current_id++;
     }
+    
+    // Build vector b: point - vertex[0]
+    for (size_t j = 0; j < n_dims; ++j) {
+        b[j] = point[j] - first_vertex[j];
+    }
+    
+    // Solve linear system A * lambda = b
+    std::vector<double> lambda = solveLinearSystem(A, b);
+    
+    // Convert to barycentric coordinates
+    // barycentric[0] = 1 - sum(lambda)
+    // barycentric[i] = lambda[i-1] for i = 1, ..., n_dims
+    double sum = 0.0;
+    for (size_t i = 0; i < n_dims; ++i) {
+        barycentric[i + 1] = lambda[i];
+        sum += lambda[i];
+    }
+    barycentric[0] = 1.0 - sum;
     
     return barycentric;
 }
@@ -212,10 +217,35 @@ std::vector<std::vector<int>> Delaunay::getSimplices() const {
         std::vector<int> simplex;
         
         for (auto vertex : vertices) {
-            simplex.push_back(vertex.id());
+            // Get vertex coordinates
+            auto vertex_point = vertex.point();
+            std::vector<double> vertex_coords(vertex_point.coordinates(), 
+                                            vertex_point.coordinates() + vertex_point.dimension());
+            
+            // Find matching point in original points_ array
+            int point_index = -1;
+            for (size_t i = 0; i < points_.size(); ++i) {
+                bool match = true;
+                for (size_t j = 0; j < points_[i].size(); ++j) {
+                    if (std::abs(points_[i][j] - vertex_coords[j]) > 1e-12) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    point_index = static_cast<int>(i);
+                    break;
+                }
+            }
+            
+            // Add valid indices only
+            if (point_index >= 0) {
+                simplex.push_back(point_index);
+            }
         }
         
-        if (!simplex.empty()) {
+        // Only add simplices with correct number of vertices
+        if (simplex.size() == points_[0].size() + 1) {
             simplices.push_back(simplex);
         }
     }

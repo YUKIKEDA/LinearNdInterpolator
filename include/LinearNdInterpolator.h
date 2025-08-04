@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Delaunay.h"
 #include <vector>
@@ -51,6 +51,13 @@ public:
      * @return 補間値（凸包外の場合は最近傍値）
      */
     std::vector<std::vector<double>> interpolate(const std::vector<std::vector<double>>& query) const;
+    
+    /**
+     * @brief 単一点での補間値を計算（テスト用オーバーロード）
+     * @param query_point 補間が実行される単一点座標
+     * @return 補間値（スカラー値、凸包外の場合はNaN）
+     */
+    double interpolate(const std::vector<double>& query_point) const;
 
 private:
     // **************************************************

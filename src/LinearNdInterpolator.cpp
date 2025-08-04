@@ -1,18 +1,10 @@
-#include "LinearNdInterpolator.h"
+﻿#include "LinearNdInterpolator.h"
 #include <stdexcept>
 #include <cmath>
 #include <limits>
 #include <algorithm>
 #include <iostream>
-
-// Qhull includes
-#include "libqhullcpp/Qhull.h"
-#include "libqhullcpp/QhullFacet.h"
-#include "libqhullcpp/QhullFacetList.h"
-#include "libqhullcpp/QhullPoint.h"
-#include "libqhullcpp/QhullVertex.h"
-#include "libqhullcpp/QhullVertexSet.h"
-#include "libqhullcpp/QhullError.h"
+#include <string>
 
 LinearNdInterpolator::LinearNdInterpolator(
     const std::vector<std::vector<double>>& points, 
@@ -40,140 +32,11 @@ LinearNdInterpolator::~LinearNdInterpolator() {
     // Smart pointer handles cleanup automatically
 }
 
-
-// **************************************************
-// パブリックメソッド
-// **************************************************
-
-std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
-    const std::vector<std::vector<double>> &query) const
-{    
-    // 入力点の検証
-    if (query.empty()) {
-        return std::vector<std::vector<double>>();
-    }
-
-    // 入力点の次元数チェック (すべてのクエリ点の次元が補間点の次元と一致しているか)
-    const size_t expected_dimension = points_[0].size();
-    for (const auto& q : query) {
-        if (q.size() != expected_dimension) {
-            throw std::invalid_argument(
-                "Input points dimension (" + 
-                std::to_string(q.size()) + 
-                ") does not match expected dimension (" + 
-                std::to_string(expected_dimension) + 
-                ")"
-            );
-        }
-    }
-
-    // 結果を格納するベクトルを初期化
-    std::vector<std::vector<double>> results;
-    results.reserve(query.size());
-
-    // **************************************************
-    // パフォーマンス最適化のための変数
-    // **************************************************
-    
-    // TODO: 以下の変数を追加
-    // - 単体検索の開始位置（前回の結果を利用）
-    // - 数値精度のためのepsilon値
-    // - 値の次元数
-    
-    // 値の次元数を取得
-    const size_t n_values = values_[0].size();
-    
-    // **************************************************
-    // 各入力点に対して補間を実行
-    // **************************************************
-    for (const auto& q : query) {
-        // **************************************************
-        // 1) 単体（シンプレックス）を見つける
-        // **************************************************
-        int isimplex = delaunay_->findSimplex(q);
-        
-        // 結果ベクトルを初期化
-        std::vector<double> interpolated_values(n_values, 0.0);
-        
-        // **************************************************
-        // 2) 凸包外の処理
-        // **************************************************
-        if (isimplex == -1) {
-            // SciPyと同様に、凸包外の場合はNaNを設定
-            for (size_t k = 0; k < n_values; ++k) {
-                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
-            }
-            results.push_back(interpolated_values);
-            continue;
-        }
-        
-        // **************************************************
-        // 3) 重心座標を計算
-        // **************************************************
-        std::vector<double> barycentric = delaunay_->calculateBarycentricCoordinates(q, isimplex);
-        
-        if (barycentric.empty()) {
-            // 重心座標の計算に失敗した場合もNaNを設定
-            for (size_t k = 0; k < n_values; ++k) {
-                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
-            }
-            results.push_back(interpolated_values);
-            continue;
-        }
-        
-        // **************************************************
-        // 4) 線形重心座標補間を実行
-        // **************************************************
-        auto simplices = delaunay_->getSimplices();
-        if (isimplex >= 0 && isimplex < static_cast<int>(simplices.size())) {
-            const auto& simplex = simplices[isimplex];
-            
-            // SciPyの実装に基づく補間計算:
-            // for (j = 0; j < ndim+1; j++) {
-            //     for (k = 0; k < nvalues; k++) {
-            //         m = simplices[isimplex,j];
-            //         out[i,k] = out[i,k] + c[j] * values[m,k];
-            //     }
-            // }
-            
-            for (size_t j = 0; j < barycentric.size() && j < simplex.size(); ++j) {
-                int vertex_index = simplex[j];
-                
-                // 頂点インデックスの範囲チェック
-                if (vertex_index >= 0 && vertex_index < static_cast<int>(values_.size())) {
-                    for (size_t k = 0; k < n_values; ++k) {
-                        interpolated_values[k] += barycentric[j] * values_[vertex_index][k];
-                    }
-                }
-            }
-        } else {
-            // 単体インデックスが無効な場合はNaNを設定
-            for (size_t k = 0; k < n_values; ++k) {
-                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
-            }
-        }
-        
-        // **************************************************
-        // 5) 結果を格納
-        // **************************************************
-        results.push_back(interpolated_values);
-    }
-
-    return results;
-}
-
-
-// **************************************************
-// プライベートメソッド
-// **************************************************
-
 void LinearNdInterpolator::initialize(
     const std::vector<std::vector<double>> &points, 
     const std::vector<std::vector<double>> &values)
 {
-    // **************************************************
     // 入力値のバリデーション
-    // **************************************************
     throwifInvalidInputDataShape(points, values);
 
     // 補間点座標と値が空の場合はエラー
@@ -230,4 +93,108 @@ void LinearNdInterpolator::setupTriangulation(
     const std::vector<std::vector<double>> &points)
 {
     delaunay_ = std::make_unique<Delaunay>(points);
+}
+
+std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
+    const std::vector<std::vector<double>> &query) const
+{    
+    // 入力点の検証
+    if (query.empty()) {
+        return std::vector<std::vector<double>>();
+    }
+
+    // 入力点の次元数チェック (すべてのクエリ点の次元が補間点の次元と一致しているか)
+    const size_t expected_dimension = points_[0].size();
+    for (const auto& q : query) {
+        if (q.size() != expected_dimension) {
+            throw std::invalid_argument(
+                "Input points dimension (" + 
+                std::to_string(q.size()) + 
+                ") does not match expected dimension (" + 
+                std::to_string(expected_dimension) + 
+                ")"
+            );
+        }
+    }
+
+    // 結果を格納するベクトルを初期化
+    std::vector<std::vector<double>> results;
+    results.reserve(query.size());
+
+    // 値の次元数を取得
+    const size_t n_values = values_[0].size();
+    
+    // 各入力点に対して補間を実行
+    for (const auto& q : query) {
+        // 単体（シンプレックス）を見つける
+        int isimplex = delaunay_->findSimplex(q);
+        
+        // 結果ベクトルを初期化
+        std::vector<double> interpolated_values(n_values, 0.0);
+        
+        // 凸包外の処理
+        if (isimplex == -1) {
+            // SciPyと同様に、凸包外の場合はNaNを設定
+            for (size_t k = 0; k < n_values; ++k) {
+                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
+            }
+            results.push_back(interpolated_values);
+            continue;
+        }
+        
+        // 重心座標を計算
+        std::vector<double> barycentric = delaunay_->calculateBarycentricCoordinates(q, isimplex);
+        
+        if (barycentric.empty()) {
+            // 重心座標の計算に失敗した場合もNaNを設定
+            for (size_t k = 0; k < n_values; ++k) {
+                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
+            }
+            results.push_back(interpolated_values);
+            continue;
+        }
+        
+        // 線形重心座標補間を実行
+        auto simplices = delaunay_->getSimplices();
+        if (isimplex >= 0 && isimplex < static_cast<int>(simplices.size())) {
+            const auto& simplex = simplices[isimplex];
+            
+            for (size_t j = 0; j < barycentric.size() && j < simplex.size(); ++j) {
+                int vertex_index = simplex[j];
+                
+                // 頂点インデックスの範囲チェック
+                if (vertex_index >= 0 && vertex_index < static_cast<int>(values_.size())) {
+                    for (size_t k = 0; k < n_values; ++k) {
+                        interpolated_values[k] += barycentric[j] * values_[vertex_index][k];
+                    }
+                }
+            }
+        } else {
+            // 単体インデックスが無効な場合はNaNを設定
+            for (size_t k = 0; k < n_values; ++k) {
+                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
+            }
+        }
+        
+        // 結果を格納
+        results.push_back(interpolated_values);
+    }
+
+    return results;
+}
+
+double LinearNdInterpolator::interpolate(const std::vector<double>& query_point) const {
+    // 単一点を複数点形式に変換
+    std::vector<std::vector<double>> query = {query_point};
+    
+    // 既存の複数点interpolateメソッドを呼び出し
+    auto results = interpolate(query);
+    
+    // 結果から最初の値を取得（1次元値の場合）
+    if (!results.empty() && !results[0].empty()) {
+        return results[0][0];
+    }
+    
+    // エラーの場合はNaNを返す
+    return std::numeric_limits<double>::quiet_NaN();
 }

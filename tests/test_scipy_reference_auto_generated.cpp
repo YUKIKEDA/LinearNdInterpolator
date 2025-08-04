@@ -56,13 +56,10 @@ protected:
     ) {
         LinearNdInterpolator interp(points, values);
         double result = interp.interpolate(query_point);
-        // Our implementation returns nearest neighbor for out-of-hull points
-        // SciPy returns NaN, but we expect finite values
-        EXPECT_TRUE(std::isfinite(result))
-            << "Out-of-hull point should return finite value, got: " << result
+        // Our implementation returns NaN for out-of-hull points (like SciPy)
+        EXPECT_TRUE(std::isnan(result))
+            << "Out-of-hull point should return NaN, got: " << result
             << " for point [" << formatPoint(query_point) << "]";
-        EXPECT_FALSE(std::isnan(result))
-            << "Our implementation should not return NaN";
     }
     
 private:

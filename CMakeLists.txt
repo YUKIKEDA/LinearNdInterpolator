@@ -20,10 +20,12 @@ add_subdirectory(${QHULL_DIR} EXCLUDE_FROM_ALL)
 # メインライブラリの作成
 set(LIBRARY_SOURCES
     src/LinearNdInterpolator.cpp
+    src/Delaunay.cpp
 )
 
 set(LIBRARY_HEADERS
     include/LinearNdInterpolator.h
+    include/Delaunay.h
 )
 
 # スタティックライブラリとして作成

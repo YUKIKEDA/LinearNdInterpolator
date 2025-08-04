@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <vector>
 #include <memory>
@@ -30,6 +30,7 @@ public:
 
 private:
     std::unique_ptr<orgQhull::Qhull> qhull_;
+    std::vector<std::vector<double>> points_;  // 元の点データ
     
     // ヘルパーメソッド
     std::vector<double> solveLinearSystem(
