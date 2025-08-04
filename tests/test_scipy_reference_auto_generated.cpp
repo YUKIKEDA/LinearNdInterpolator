@@ -1,10 +1,11 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 #include "LinearNdInterpolator.h"
 #include <cmath>
 #include <vector>
 #include <limits>
 #include <string>
 #include <chrono>
+#include <sstream>
 
 // Auto-generated SciPy Reference Validation Tests
 // Generated from: script/out/scipy_reference_data.json
@@ -13,15 +14,20 @@
 class SciPyReferenceTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        exact_tolerance_ = 1e-12;  // For exact vertex matches
-        interpolation_tolerance_ = 1e-10;  // For linear interpolation
-        loose_tolerance_ = 1e-6;   // For complex cases with numerical instability
+        exact_tolerance_ = 1e-12;         // For exact vertex matches
+        interpolation_tolerance_ = 1e-10; // For linear interpolation (matches C++ implementation)
+        loose_tolerance_ = 1e-6;          // For complex cases with numerical instability
+        precision_tolerance_ = 1e-9;      // For numerical precision tests
+        large_scale_tolerance_ = 1e-8;    // For large coordinate value tests
     }
     
     double exact_tolerance_;
     double interpolation_tolerance_;
     double loose_tolerance_;
+    double precision_tolerance_;
+    double large_scale_tolerance_;
     
+    // Scalar value validation methods
     void validateExactMatch(
         const std::vector<std::vector<double>>& points,
         const std::vector<double>& values,
@@ -31,7 +37,8 @@ protected:
         LinearNdInterpolator interp(points, values);
         double result = interp.interpolate(query_point);
         EXPECT_NEAR(result, expected_result, exact_tolerance_)
-            << "Exact match failed for point [" << formatPoint(query_point) << "]";
+            << "Exact match failed for point [" << formatPoint(query_point) << "]"
+            << "\nExpected: " << expected_result << ", Got: " << result;
     }
     
     void validateInterpolation(
@@ -39,14 +46,25 @@ protected:
         const std::vector<double>& values,
         const std::vector<double>& query_point,
         double expected_result,
-        bool use_loose_tolerance = false
+        const std::string& test_type = "standard"
     ) {
         LinearNdInterpolator interp(points, values);
         double result = interp.interpolate(query_point);
-        double tolerance = use_loose_tolerance ? loose_tolerance_ : interpolation_tolerance_;
+        
+        double tolerance = interpolation_tolerance_;
+        if (test_type == "loose" || test_type == "random" || test_type == "large") {
+            tolerance = loose_tolerance_;
+        } else if (test_type == "precision") {
+            tolerance = precision_tolerance_;
+        } else if (test_type == "large_scale") {
+            tolerance = large_scale_tolerance_;
+        }
+        
         EXPECT_NEAR(result, expected_result, tolerance)
-            << "Interpolation failed for point [" << formatPoint(query_point) << "]\n"
-            << "Expected: " << expected_result << ", Got: " << result;
+            << "Interpolation failed for point [" << formatPoint(query_point) << "]"
+            << "\nTest type: " << test_type
+            << "\nExpected: " << expected_result << ", Got: " << result
+            << "\nTolerance: " << tolerance;
     }
     
     void validateOutOfHull(
@@ -62,20 +80,103 @@ protected:
             << " for point [" << formatPoint(query_point) << "]";
     }
     
+    // Vector value validation methods
+    void validateVectorExactMatch(
+        const std::vector<std::vector<double>>& points,
+        const std::vector<std::vector<double>>& values,
+        const std::vector<double>& query_point,
+        const std::vector<double>& expected_result
+    ) {
+        LinearNdInterpolator interp(points, values);
+        std::vector<std::vector<double>> result = interp.interpolate(std::vector<std::vector<double>>{query_point});
+        
+        ASSERT_EQ(result.size(), 1) << "Expected single result";
+        ASSERT_EQ(result[0].size(), expected_result.size()) << "Result dimension mismatch";
+        
+        for (size_t i = 0; i < expected_result.size(); ++i) {
+            EXPECT_NEAR(result[0][i], expected_result[i], exact_tolerance_)
+                << "Vector exact match failed at index " << i
+                << " for point [" << formatPoint(query_point) << "]"
+                << "\nExpected[" << i << "]: " << expected_result[i]
+                << ", Got[" << i << "]: " << result[0][i];
+        }
+    }
+    
+    void validateVectorInterpolation(
+        const std::vector<std::vector<double>>& points,
+        const std::vector<std::vector<double>>& values,
+        const std::vector<double>& query_point,
+        const std::vector<double>& expected_result,
+        const std::string& test_type = "standard"
+    ) {
+        LinearNdInterpolator interp(points, values);
+        std::vector<std::vector<double>> result = interp.interpolate(std::vector<std::vector<double>>{query_point});
+        
+        ASSERT_EQ(result.size(), 1) << "Expected single result";
+        ASSERT_EQ(result[0].size(), expected_result.size()) << "Result dimension mismatch";
+        
+        double tolerance = interpolation_tolerance_;
+        if (test_type == "loose" || test_type == "random" || test_type == "large") {
+            tolerance = loose_tolerance_;
+        } else if (test_type == "precision") {
+            tolerance = precision_tolerance_;
+        }
+        
+        for (size_t i = 0; i < expected_result.size(); ++i) {
+            EXPECT_NEAR(result[0][i], expected_result[i], tolerance)
+                << "Vector interpolation failed at index " << i
+                << " for point [" << formatPoint(query_point) << "]"
+                << "\nTest type: " << test_type
+                << "\nExpected[" << i << "]: " << expected_result[i]
+                << ", Got[" << i << "]: " << result[0][i]
+                << "\nTolerance: " << tolerance;
+        }
+    }
+    
+    void validateVectorOutOfHull(
+        const std::vector<std::vector<double>>& points,
+        const std::vector<std::vector<double>>& values,
+        const std::vector<double>& query_point
+    ) {
+        LinearNdInterpolator interp(points, values);
+        std::vector<std::vector<double>> result = interp.interpolate(std::vector<std::vector<double>>{query_point});
+        
+        ASSERT_EQ(result.size(), 1) << "Expected single result";
+        
+        // All components should be NaN for out-of-hull points
+        for (size_t i = 0; i < result[0].size(); ++i) {
+            EXPECT_TRUE(std::isnan(result[0][i]))
+                << "Out-of-hull point component " << i << " should return NaN, got: " << result[0][i]
+                << " for point [" << formatPoint(query_point) << "]";
+        }
+    }
+    
 private:
     std::string formatPoint(const std::vector<double>& point) {
-        std::string result;
+        std::ostringstream oss;
         for (size_t i = 0; i < point.size(); ++i) {
-            if (i > 0) result += ", ";
-            result += std::to_string(point[i]);
+            if (i > 0) oss << ", ";
+            oss << point[i];
         }
-        return result;
+        return oss.str();
+    }
+    
+    std::string formatVector(const std::vector<double>& vec) {
+        std::ostringstream oss;
+        oss << "[";
+        for (size_t i = 0; i < vec.size(); ++i) {
+            if (i > 0) oss << ", ";
+            oss << vec[i];
+        }
+        oss << "]";
+        return oss.str();
     }
 };
 
 
 // Test Case: 2D_Basic_Triangle
 // Description: Basic 2D triangle interpolation
+// Values Type: scalar
 TEST_F(SciPyReferenceTest, 2D_Basic_Triangle) {
     std::vector<std::vector<double>> points = {
         {0.0000000000, 0.0000000000},
@@ -99,13 +200,13 @@ TEST_F(SciPyReferenceTest, 2D_Basic_Triangle) {
     validateExactMatch(points, values, {0.5000000000, 0.5000000000}, 1.0000000000);
 
     // Query 5
-    validateInterpolation(points, values, {0.2500000000, 0.2500000000}, 0.5000000000);
+    validateInterpolation(points, values, {0.2500000000, 0.2500000000}, 0.5000000000, "standard");
 
     // Query 6
-    validateInterpolation(points, values, {0.3000000000, 0.4000000000}, 0.7000000000);
+    validateInterpolation(points, values, {0.3000000000, 0.4000000000}, 0.7000000000, "standard");
 
     // Query 7
-    validateInterpolation(points, values, {0.7500000000, 0.2500000000}, 1.0000000000);
+    validateInterpolation(points, values, {0.7500000000, 0.2500000000}, 1.0000000000, "standard");
 
     // Query 8
     validateOutOfHull(points, values, {-0.5000000000, -0.5000000000});
@@ -114,12 +215,13 @@ TEST_F(SciPyReferenceTest, 2D_Basic_Triangle) {
     validateOutOfHull(points, values, {2.0000000000, 2.0000000000});
 
     // Query 10
-    validateInterpolation(points, values, {0.1000000000, 0.1000000000}, 0.2000000000);
+    validateInterpolation(points, values, {0.1000000000, 0.1000000000}, 0.2000000000, "standard");
 
 }
 
 // Test Case: 2D_Complex_Random
 // Description: Complex 2D random points with f(x,y) = x + y
+// Values Type: scalar
 TEST_F(SciPyReferenceTest, 2D_Complex_Random) {
     std::vector<std::vector<double>> points = {
         {-0.2509197623, 0.9014286128},
@@ -137,13 +239,13 @@ TEST_F(SciPyReferenceTest, 2D_Complex_Random) {
     std::vector<double> values = {0.6505088505, 0.6613048520, -1.3759736784, -0.1514804841, 0.6183751791, -0.0190113071, 0.0895635030, -1.2695410459, -0.3420026508, -0.5536516823};
 
     // Query 1
-    validateInterpolation(points, values, {0.0000000000, 0.0000000000}, -0.0000000000, true);
+    validateInterpolation(points, values, {0.0000000000, 0.0000000000}, -0.0000000000, "random");
 
     // Query 2
     validateOutOfHull(points, values, {0.5000000000, 0.3000000000});
 
     // Query 3
-    validateInterpolation(points, values, {-0.2000000000, 0.4000000000}, 0.2000000000, true);
+    validateInterpolation(points, values, {-0.2000000000, 0.4000000000}, 0.2000000000, "random");
 
     // Query 4
     validateOutOfHull(points, values, {0.8000000000, -0.1000000000});
@@ -158,6 +260,7 @@ TEST_F(SciPyReferenceTest, 2D_Complex_Random) {
 
 // Test Case: 3D_Basic_Tetrahedron
 // Description: Basic 3D tetrahedron interpolation
+// Values Type: scalar
 TEST_F(SciPyReferenceTest, 3D_Basic_Tetrahedron) {
     std::vector<std::vector<double>> points = {
         {0.0000000000, 0.0000000000, 0.0000000000},
@@ -182,10 +285,10 @@ TEST_F(SciPyReferenceTest, 3D_Basic_Tetrahedron) {
     validateExactMatch(points, values, {0.0000000000, 0.0000000000, 1.0000000000}, 1.0000000000);
 
     // Query 5
-    validateInterpolation(points, values, {0.2500000000, 0.2500000000, 0.2500000000}, 0.7500000000);
+    validateInterpolation(points, values, {0.2500000000, 0.2500000000, 0.2500000000}, 0.7500000000, "standard");
 
     // Query 6
-    validateInterpolation(points, values, {0.1000000000, 0.2000000000, 0.3000000000}, 0.6000000000);
+    validateInterpolation(points, values, {0.1000000000, 0.2000000000, 0.3000000000}, 0.6000000000, "standard");
 
     // Query 7
     validateOutOfHull(points, values, {2.0000000000, 2.0000000000, 2.0000000000});
@@ -197,6 +300,7 @@ TEST_F(SciPyReferenceTest, 3D_Basic_Tetrahedron) {
 
 // Test Case: 4D_Basic_Simplex
 // Description: Basic 4D simplex interpolation
+// Values Type: scalar
 TEST_F(SciPyReferenceTest, 4D_Basic_Simplex) {
     std::vector<std::vector<double>> points = {
         {0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000},
@@ -219,18 +323,297 @@ TEST_F(SciPyReferenceTest, 4D_Basic_Simplex) {
     validateExactMatch(points, values, {0.5000000000, 0.5000000000, 0.5000000000, 0.5000000000}, 2.0000000000);
 
     // Query 4
-    validateInterpolation(points, values, {0.2000000000, 0.2000000000, 0.2000000000, 0.2000000000}, 0.8000000000);
+    validateInterpolation(points, values, {0.2000000000, 0.2000000000, 0.2000000000, 0.2000000000}, 0.8000000000, "standard");
 
     // Query 5
-    validateInterpolation(points, values, {0.1000000000, 0.3000000000, 0.2000000000, 0.4000000000}, 1.0000000000);
+    validateInterpolation(points, values, {0.1000000000, 0.3000000000, 0.2000000000, 0.4000000000}, 1.0000000000, "standard");
 
     // Query 6
     validateOutOfHull(points, values, {2.0000000000, 2.0000000000, 2.0000000000, 2.0000000000});
 
 }
 
+// Test Case: 4D_Vector_Values
+// Description: 4D interpolation with 2D vector values
+// Values Type: vector
+TEST_F(SciPyReferenceTest, 4D_Vector_Values) {
+    std::vector<std::vector<double>> points = {
+        {0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000},
+        {1.0000000000, 0.0000000000, 0.0000000000, 0.0000000000},
+        {0.0000000000, 1.0000000000, 0.0000000000, 0.0000000000},
+        {0.0000000000, 0.0000000000, 1.0000000000, 0.0000000000},
+        {0.0000000000, 0.0000000000, 0.0000000000, 1.0000000000},
+        {0.5000000000, 0.5000000000, 0.5000000000, 0.5000000000},
+    };
+
+    std::vector<std::vector<double>> values = {
+        {0.0000000000, 0.0000000000},
+        {1.0000000000, 2.0000000000},
+        {1.0000000000, -1.0000000000},
+        {1.0000000000, 0.5000000000},
+        {1.0000000000, 1.5000000000},
+        {2.0000000000, 1.0000000000},
+    };
+
+    // Query 1
+    validateVectorExactMatch(points, values, {0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000}, {0.0000000000, 0.0000000000});
+
+    // Query 2
+    validateVectorExactMatch(points, values, {1.0000000000, 0.0000000000, 0.0000000000, 0.0000000000}, {1.0000000000, 2.0000000000});
+
+    // Query 3
+    validateVectorExactMatch(points, values, {0.5000000000, 0.5000000000, 0.5000000000, 0.5000000000}, {2.0000000000, 1.0000000000});
+
+    // Query 4
+    validateVectorInterpolation(points, values, {0.2000000000, 0.2000000000, 0.2000000000, 0.2000000000}, {0.8000000000, 0.4000000000}, "standard");
+
+    // Query 5
+    validateVectorInterpolation(points, values, {0.1000000000, 0.3000000000, 0.2000000000, 0.4000000000}, {1.0000000000, 0.5000000000}, "standard");
+
+    // Query 6
+    validateVectorOutOfHull(points, values, {2.0000000000, 2.0000000000, 2.0000000000, 2.0000000000});
+
+}
+
+// Test Case: 5D_Basic_Simplex
+// Description: 5D interpolation (triggers Qx option in C++)
+// Values Type: scalar
+TEST_F(SciPyReferenceTest, 5D_Basic_Simplex) {
+    std::vector<std::vector<double>> points = {
+        {0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000},
+        {1.0000000000, 0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000},
+        {0.0000000000, 1.0000000000, 0.0000000000, 0.0000000000, 0.0000000000},
+        {0.0000000000, 0.0000000000, 1.0000000000, 0.0000000000, 0.0000000000},
+        {0.0000000000, 0.0000000000, 0.0000000000, 1.0000000000, 0.0000000000},
+        {0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000, 1.0000000000},
+        {0.2000000000, 0.2000000000, 0.2000000000, 0.2000000000, 0.2000000000},
+    };
+
+    std::vector<double> values = {0.0000000000, 1.0000000000, 1.0000000000, 1.0000000000, 1.0000000000, 1.0000000000, 1.0000000000};
+
+    // Query 1
+    validateExactMatch(points, values, {0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000}, 0.0000000000);
+
+    // Query 2
+    validateExactMatch(points, values, {0.2000000000, 0.2000000000, 0.2000000000, 0.2000000000, 0.2000000000}, 1.0000000000);
+
+    // Query 3
+    validateInterpolation(points, values, {0.1000000000, 0.1000000000, 0.1000000000, 0.1000000000, 0.1000000000}, 0.5000000000, "loose");
+
+    // Query 4
+    validateInterpolation(points, values, {0.1500000000, 0.1500000000, 0.1500000000, 0.1500000000, 0.1500000000}, 0.7500000000, "loose");
+
+    // Query 5
+    validateOutOfHull(points, values, {2.0000000000, 2.0000000000, 2.0000000000, 2.0000000000, 2.0000000000});
+
+}
+
+// Test Case: 6D_Random_Points
+// Description: 6D interpolation with random points
+// Values Type: scalar
+TEST_F(SciPyReferenceTest, 6D_Random_Points) {
+    std::vector<std::vector<double>> points = {
+        {-0.3533303569, -0.5395057794, 0.5875577395, 0.2488393614, 0.9508209338, 0.5177717813},
+        {-0.9787599001, -0.9505460723, -0.7779199880, 0.0762987505, -0.9090853298, 0.1031406926},
+        {0.4567300915, -0.4032432698, 0.4662304461, 0.2810513620, -0.5587805862, -0.7457662313},
+        {-0.3450536525, -0.1701134779, -0.7242042882, 0.1823535759, -0.2589996819, 0.1918510970},
+        {0.5736983331, 0.6928797610, 0.0009540810, 0.8213209102, -0.0134333845, 0.7037289945},
+        {0.6428231432, -0.5708398045, -0.6131725712, -0.7308462678, 0.6016692140, 0.5382712153},
+        {-0.5746838311, 0.5204239086, 0.4812611472, 0.7257322644, -0.0904187641, 0.2954878492},
+        {-0.3428176235, 0.1844770896, -0.3995320899, 0.1430312489, -0.5362715627, 0.5800423694},
+        {0.1113055819, -0.2072091195, -0.7422243013, 0.7777251529, 0.4392276178, -0.0185022418},
+        {-0.9462642582, 0.5296459153, 0.1200195211, 0.5443623443, -0.6022735916, 0.8586507986},
+        {0.5681537671, 0.0562442506, -0.5804838297, 0.3670092211, 0.8034706716, 0.1976214534},
+        {-0.9512921198, -0.2254521004, 0.0417061994, 0.7679594583, -0.6353132078, -0.0186907784},
+        {0.9418752876, 0.0662000068, -0.4515682336, 0.6520061644, -0.7872890169, -0.1659152222},
+        {0.1891955210, -0.2845697878, 0.6813483798, 0.7268114041, 0.8543712635, 0.2332824800},
+        {0.0236944940, -0.1048824368, 0.3180006356, -0.6170940631, 0.8370465277, -0.5282351935},
+    };
+
+    std::vector<double> values = {1.9952020179, 3.3095639238, 1.5359712232, 0.8096129748, 1.9791960419, 2.3009382894, 1.4548907837, 0.9556758878, 1.4043411118, 2.5866905623, 1.4822387226, 1.9512587005, 2.1678892634, 1.8936363124, 1.4731705508};
+
+    // Query 1
+    validateInterpolation(points, values, {0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000, 0.0000000000}, 1.3040867479, "random");
+
+    // Query 2
+    validateInterpolation(points, values, {0.1000000000, 0.2000000000, -0.1000000000, 0.3000000000, -0.2000000000, 0.4000000000}, 1.5059072370, "random");
+
+    // Query 3
+    validateOutOfHull(points, values, {2.0000000000, 2.0000000000, 2.0000000000, 2.0000000000, 2.0000000000, 2.0000000000});
+
+}
+
+// Test Case: Numerical_Precision_Boundary
+// Description: Numerical precision test around 1e-10 tolerance
+// Values Type: scalar
+TEST_F(SciPyReferenceTest, Numerical_Precision_Boundary) {
+    std::vector<std::vector<double>> points = {
+        {0.0000000000, 0.0000000000},
+        {1.0000000000, 0.0000000000},
+        {0.0000000000, 1.0000000000},
+        {0.5000000000, 0.5000000000},
+    };
+
+    std::vector<double> values = {0.0000000000, 1.0000000000, 1.0000000000, 1.0000000000};
+
+    // Query 1
+    validateInterpolation(points, values, {0.0000000001, 0.0000000001}, 0.0000000002, "precision");
+
+    // Query 2
+    validateOutOfHull(points, values, {-0.0000000001, -0.0000000001});
+
+    // Query 3
+    validateInterpolation(points, values, {0.5000000001, 0.4999999999}, 1.0000000000, "precision");
+
+    // Query 4
+    validateInterpolation(points, values, {0.4999999999, 0.5000000001}, 1.0000000000, "precision");
+
+    // Query 5
+    validateInterpolation(points, values, {0.9999999999, 0.0000000001}, 1.0000000000, "precision");
+
+    // Query 6
+    validateInterpolation(points, values, {0.0000000001, 0.9999999999}, 1.0000000000, "precision");
+
+    // Query 7
+    validateInterpolation(points, values, {0.3333333333, 0.3333333333}, 0.6666666667, "precision");
+
+    // Query 8
+    validateInterpolation(points, values, {0.3333333333, 0.3333333333}, 0.6666666667, "precision");
+
+    // Query 9
+    validateInterpolation(points, values, {0.3000000000, 0.3000000000}, 0.6000000000, "precision");
+
+}
+
+// Test Case: Large_Scale_Precision
+// Description: Numerical precision test with large coordinate values
+// Values Type: scalar
+TEST_F(SciPyReferenceTest, Large_Scale_Precision) {
+    std::vector<std::vector<double>> points = {
+        {1000000.0000000000, 1000000.0000000000},
+        {1000001.0000000000, 1000000.0000000000},
+        {1000000.0000000000, 1000001.0000000000},
+        {1000000.5000000000, 1000000.5000000000},
+    };
+
+    std::vector<double> values = {0.0000000000, 1.0000000000, 1.0000000000, 1.0000000000};
+
+    // Query 1
+    validateInterpolation(points, values, {1000000.2500000000, 1000000.2500000000}, 0.5000000000, "precision");
+
+    // Query 2
+    validateInterpolation(points, values, {1000000.1000000000, 1000000.1000000000}, 0.2000000000, "precision");
+
+    // Query 3
+    validateOutOfHull(points, values, {999999.0000000000, 999999.0000000000});
+
+}
+
+// Test Case: Boundary_Edge_Points
+// Description: Points on triangle edges and near boundaries
+// Values Type: scalar
+TEST_F(SciPyReferenceTest, Boundary_Edge_Points) {
+    std::vector<std::vector<double>> points = {
+        {0.0000000000, 0.0000000000},
+        {2.0000000000, 0.0000000000},
+        {1.0000000000, 2.0000000000},
+        {1.0000000000, 1.0000000000},
+    };
+
+    std::vector<double> values = {1.0000000000, 2.0000000000, 3.0000000000, 2.5000000000};
+
+    // Query 1
+    validateInterpolation(points, values, {1.0000000000, 0.0000000000}, 1.5000000000, "precision");
+
+    // Query 2
+    validateInterpolation(points, values, {0.5000000000, 1.0000000000}, 2.0000000000, "precision");
+
+    // Query 3
+    validateInterpolation(points, values, {1.5000000000, 1.0000000000}, 2.5000000000, "precision");
+
+    // Query 4
+    validateInterpolation(points, values, {1.0000000000, 0.5000000000}, 2.0000000000, "precision");
+
+    // Query 5
+    validateInterpolation(points, values, {0.1000000000, 0.0500000000}, 1.1000000000, "precision");
+
+    // Query 6
+    validateInterpolation(points, values, {1.9000000000, 0.0500000000}, 2.0000000000, "precision");
+
+    // Query 7
+    validateOutOfHull(points, values, {0.9900000000, 1.9900000000});
+
+}
+
+// Test Case: 2D_to_3D_Vector
+// Description: 2D points to 3D vector values interpolation
+// Values Type: vector
+TEST_F(SciPyReferenceTest, 2D_to_3D_Vector) {
+    std::vector<std::vector<double>> points = {
+        {0.0000000000, 0.0000000000},
+        {1.0000000000, 0.0000000000},
+        {0.0000000000, 1.0000000000},
+        {1.0000000000, 1.0000000000},
+    };
+
+    std::vector<std::vector<double>> values = {
+        {0.0000000000, 0.0000000000, 0.0000000000},
+        {1.0000000000, 0.0000000000, 0.0000000000},
+        {0.0000000000, 1.0000000000, 0.0000000000},
+        {1.0000000000, 1.0000000000, 1.0000000000},
+    };
+
+    // Query 1
+    validateVectorInterpolation(points, values, {0.5000000000, 0.5000000000}, {0.5000000000, 0.5000000000, 0.5000000000}, "standard");
+
+    // Query 2
+    validateVectorInterpolation(points, values, {0.2500000000, 0.2500000000}, {0.2500000000, 0.2500000000, 0.2500000000}, "standard");
+
+    // Query 3
+    validateVectorInterpolation(points, values, {0.7500000000, 0.2500000000}, {0.7500000000, 0.2500000000, 0.2500000000}, "standard");
+
+    // Query 4
+    validateVectorInterpolation(points, values, {0.2500000000, 0.7500000000}, {0.2500000000, 0.7500000000, 0.2500000000}, "standard");
+
+    // Query 5
+    validateVectorOutOfHull(points, values, {2.0000000000, 2.0000000000});
+
+}
+
+// Test Case: 3D_to_2D_Vector
+// Description: 3D points to 2D vector values interpolation
+// Values Type: vector
+TEST_F(SciPyReferenceTest, 3D_to_2D_Vector) {
+    std::vector<std::vector<double>> points = {
+        {0.0000000000, 0.0000000000, 0.0000000000},
+        {1.0000000000, 0.0000000000, 0.0000000000},
+        {0.0000000000, 1.0000000000, 0.0000000000},
+        {0.0000000000, 0.0000000000, 1.0000000000},
+        {0.5000000000, 0.5000000000, 0.5000000000},
+    };
+
+    std::vector<std::vector<double>> values = {
+        {0.0000000000, 0.0000000000},
+        {1.0000000000, 0.0000000000},
+        {0.0000000000, 1.0000000000},
+        {0.5000000000, 0.5000000000},
+        {0.5000000000, 0.2500000000},
+    };
+
+    // Query 1
+    validateVectorInterpolation(points, values, {0.2500000000, 0.2500000000, 0.2500000000}, {0.2500000000, 0.1250000000}, "standard");
+
+    // Query 2
+    validateVectorInterpolation(points, values, {0.1000000000, 0.2000000000, 0.3000000000}, {0.2000000000, 0.2500000000}, "standard");
+
+    // Query 3
+    validateVectorOutOfHull(points, values, {2.0000000000, 2.0000000000, 2.0000000000});
+
+}
+
 // Test Case: 2D_Collinear_Points
 // Description: 2D interpolation with some collinear points
+// Values Type: scalar
 TEST_F(SciPyReferenceTest, 2D_Collinear_Points) {
     std::vector<std::vector<double>> points = {
         {0.0000000000, 0.0000000000},
@@ -242,10 +625,10 @@ TEST_F(SciPyReferenceTest, 2D_Collinear_Points) {
     std::vector<double> values = {0.0000000000, 2.0000000000, 4.0000000000, 1.0000000000};
 
     // Query 1
-    validateInterpolation(points, values, {0.5000000000, 0.5000000000}, 1.0000000000);
+    validateInterpolation(points, values, {0.5000000000, 0.5000000000}, 1.0000000000, "standard");
 
     // Query 2
-    validateInterpolation(points, values, {1.5000000000, 1.5000000000}, 3.0000000000);
+    validateInterpolation(points, values, {1.5000000000, 1.5000000000}, 3.0000000000, "standard");
 
     // Query 3
     validateOutOfHull(points, values, {0.5000000000, 0.0000000000});
@@ -254,6 +637,7 @@ TEST_F(SciPyReferenceTest, 2D_Collinear_Points) {
 
 // Test Case: 2D_Duplicate_Points
 // Description: 2D interpolation with duplicate points
+// Values Type: scalar
 TEST_F(SciPyReferenceTest, 2D_Duplicate_Points) {
     std::vector<std::vector<double>> points = {
         {0.0000000000, 0.0000000000},
@@ -268,12 +652,13 @@ TEST_F(SciPyReferenceTest, 2D_Duplicate_Points) {
     validateExactMatch(points, values, {0.0000000000, 0.0000000000}, 0.0000000000);
 
     // Query 2
-    validateInterpolation(points, values, {0.5000000000, 0.5000000000}, 1.0000000000);
+    validateInterpolation(points, values, {0.5000000000, 0.5000000000}, 1.0000000000, "standard");
 
 }
 
 // Test Case: 2D_Large_Dataset
 // Description: Performance test with 100 2D points, f(x,y) = x^2 + y^2
+// Values Type: scalar
 TEST_F(SciPyReferenceTest, 2D_Large_Dataset) {
     std::vector<std::vector<double>> points = {
         {6.9646918560, 2.8613933495},
@@ -381,34 +766,165 @@ TEST_F(SciPyReferenceTest, 2D_Large_Dataset) {
     std::vector<double> values = {56.6945045493, 35.5409556593, 69.6654675083, 143.0890183683, 38.5051641940, 64.9284626606, 19.5907065147, 70.3076448083, 6.4086550419, 56.5387445430, 112.3998949001, 89.8185248320, 62.6226901057, 18.2995133908, 48.4398809921, 19.6580027146, 42.9367696466, 27.8838507506, 97.9919633724, 114.3278189237, 40.2684899331, 27.2750863098, 81.3219447088, 120.4650191465, 64.5504488843, 69.7390393641, 66.0780650152, 20.9976500062, 63.8078257958, 102.6955644442, 79.1302583692, 84.5709702454, 71.6462188300, 64.2584784395, 36.5429526596, 79.2964475159, 91.6772500236, 35.3609410609, 33.5277918936, 50.7191907993, 58.0434924487, 45.8623336678, 156.4278507042, 12.9633236387, 25.1435415855, 148.7705460388, 70.8154559948, 83.0310232667, 18.1941803752, 17.5973597054, 70.7688793513, 2.8350095316, 54.1338882490, 102.2666478994, 87.8189194424, 22.5858032133, 71.6696752975, 41.9810641953, 60.6718533295, 97.6833893508, 86.2756019476, 35.5960615894, 178.0973841887, 38.4829044140, 80.6726196633, 56.0411011148, 111.0560029550, 97.3613684453, 22.5319169135, 50.3118178086, 9.6836194887, 118.4177768960, 77.7027154287, 55.2719374768, 120.6581395142, 63.7493160575, 17.6026942432, 45.4981033175, 123.0345057479, 67.8738021240, 77.7403881626, 32.7159590478, 100.3475856775, 97.4012057827, 89.3125289950, 57.1233243874, 141.3418591405, 84.4412421935, 2.5846853434, 33.9539666444, 33.1032990810, 69.9328307258, 87.1776519815, 30.4309686455, 120.7425793851, 55.7651367081, 59.0367375226, 40.5228913174, 55.5734931288, 23.8470830763};
 
     // Query 1
-    validateInterpolation(points, values, {5.4263592579, 0.6677444323}, 31.1677051816, true);
+    validateInterpolation(points, values, {5.4263592579, 0.6677444323}, 31.1677051816, "large_scale");
 
     // Query 2
     validateOutOfHull(points, values, {6.5336487135, 9.9608632737});
 
     // Query 3
-    validateInterpolation(points, values, {7.6939733707, 5.7377411366}, 92.3279135847, true);
+    validateInterpolation(points, values, {7.6939733707, 5.7377411366}, 92.3279135847, "large_scale");
 
     // Query 4
-    validateInterpolation(points, values, {1.0263525921, 6.9983407477}, 50.5058717126, true);
+    validateInterpolation(points, values, {1.0263525921, 6.9983407477}, 50.5058717126, "large_scale");
 
     // Query 5
-    validateInterpolation(points, values, {6.6116786733, 0.4909713062}, 46.1518930367, true);
+    validateInterpolation(points, values, {6.6116786733, 0.4909713062}, 46.1518930367, "large_scale");
 
     // Query 6
-    validateInterpolation(points, values, {7.9229930184, 5.1871659089}, 90.4081504330, true);
+    validateInterpolation(points, values, {7.9229930184, 5.1871659089}, 90.4081504330, "large_scale");
 
     // Query 7
-    validateInterpolation(points, values, {4.2586769420, 7.8818717360}, 80.5784029344, true);
+    validateInterpolation(points, values, {4.2586769420, 7.8818717360}, 80.5784029344, "large_scale");
 
     // Query 8
-    validateInterpolation(points, values, {4.1156922321, 4.8102627551}, 40.3223827284, true);
+    validateInterpolation(points, values, {4.1156922321, 4.8102627551}, 40.3223827284, "large_scale");
 
     // Query 9
-    validateInterpolation(points, values, {1.8162884267, 3.2131889951}, 14.2354695032, true);
+    validateInterpolation(points, values, {1.8162884267, 3.2131889951}, 14.2354695032, "large_scale");
 
     // Query 10
-    validateInterpolation(points, values, {8.4553299656, 1.8690374893}, 75.7287038844, true);
+    validateInterpolation(points, values, {8.4553299656, 1.8690374893}, 75.7287038844, "large_scale");
+
+}
+
+// Test Case: 3D_Medium_Dataset
+// Description: Performance test with 50 3D points, f(x,y,z) = sqrt(x^2+y^2+z^2)
+// Values Type: scalar
+TEST_F(SciPyReferenceTest, 3D_Medium_Dataset) {
+    std::vector<std::vector<double>> points = {
+        {1.2437795468, 0.8153339159, 3.9182162782},
+        {4.0426169442, 3.1281421391, 3.0205681664},
+        {4.4285095156, 3.7955873392, 0.9055252807},
+        {0.7508465807, 2.1783968557, 1.9263627633},
+        {2.8785493490, 0.7304534723, 3.4329650935},
+        {2.3440200253, 2.8499957383, 3.2285050740},
+        {3.6167032204, 3.4033537999, 0.9045856970},
+        {0.5907924175, 1.2136719777, 0.0409170806},
+        {1.8003424886, 0.7302087265, 2.7136152852},
+        {4.2855171887, 1.0010608229, 0.6731672935},
+        {1.0679678032, 4.8657782692, 4.2916489346},
+        {2.6689266095, 2.1722929549, 0.9359628325},
+        {1.4413798998, 3.1358366554, 1.7785293576},
+        {3.6472770719, 2.7849411663, 4.7119497656},
+        {0.7677281651, 4.4811279644, 0.8901733548},
+        {2.9713125894, 0.2131481389, 3.2669527369},
+        {1.8335977521, 3.9778488616, 0.0545352336},
+        {2.4013851947, 0.4840506532, 0.6403647220},
+        {4.0961210397, 3.0169289213, 4.8293810413},
+        {3.4660038861, 4.8772904727, 2.5864836911},
+        {2.6243732794, 0.5897143689, 1.6590069432},
+        {1.3620821680, 4.3493041885, 0.4344919844},
+        {2.3926077964, 4.1889491759, 2.5489399823},
+        {0.2417299105, 3.0662858331, 2.0416061240},
+        {3.5631146964, 0.4429177819, 1.9092207681},
+        {0.1194741307, 1.9265235497, 0.7105443202},
+        {1.1128626999, 3.9690646325, 3.5904198692},
+        {2.4185124046, 4.9011524172, 3.8065733386},
+        {0.4540541135, 2.6864846980, 3.3896701782},
+        {3.7009029881, 3.1377829258, 4.4164190119},
+        {3.9993023752, 2.7697139430, 4.3526080218},
+        {2.0460234099, 0.3360854269, 0.7057428506},
+        {4.9874313058, 0.9844763251, 4.4394231205},
+        {3.2392337770, 0.1385469890, 3.1857326676},
+        {4.3845397136, 0.8281952788, 1.1692783177},
+        {1.3056275724, 1.6134137742, 3.7726048518},
+        {0.4226187111, 4.9540538811, 0.7448325501},
+        {4.3767698107, 0.1963429530, 0.5626941065},
+        {1.4542268992, 4.5149650092, 4.6016155304},
+        {0.1012739148, 3.8097403451, 1.5818713055},
+        {2.0960141518, 2.8390804952, 3.4931383513},
+        {0.1569818249, 0.0387981117, 3.7355534056},
+        {4.8393928047, 1.4504970724, 4.7106634650},
+        {2.9556412369, 0.6769995591, 0.4408109498},
+        {3.1474315472, 2.5231776778, 2.6115473413},
+        {3.1421877568, 1.1270670302, 1.3094411589},
+        {2.8123694114, 1.9574751129, 3.5400378580},
+        {1.0677137050, 1.4272601338, 4.2383933125},
+        {2.3078929381, 0.3719532067, 4.3001070391},
+        {2.1014720161, 2.6246063303, 3.2585111638},
+    };
+
+    std::vector<double> values = {4.1909635835, 5.9373274331, 5.9023856035, 3.0033409637, 4.5392574242, 4.9030756266, 5.0479336916, 1.3504479099, 3.3373860694, 4.4520708161, 6.5753025765, 3.5662378430, 3.8825525394, 6.5773093232, 4.6327446477, 4.4212114650, 4.3804493347, 2.5319997759, 7.0144842241, 6.5185154121, 3.1602851429, 4.5782636491, 5.4560940515, 3.6917066143, 4.0665816656, 2.0568520332, 5.4665393333, 6.6603676963, 4.3489342474, 6.5610305216, 6.5277049111, 2.1902598428, 6.7492327199, 4.5454068421, 4.6127332140, 4.3058465756, 5.0275274200, 4.4171584971, 6.6086723627, 4.1263415674, 4.9654475049, 3.7390517291, 6.9075331889, 3.0640590428, 4.8055104259, 3.5858416220, 4.9267634974, 4.5979410519, 4.8944498720, 4.6821616833};
+
+    // Query 1
+    validateOutOfHull(points, values, {1.8552042797, 4.9306389795, 1.3866181762});
+
+    // Query 2
+    validateInterpolation(points, values, {3.4068910499, 2.7260529566, 2.6355751996}, 5.1162187465, "standard");
+
+    // Query 3
+    validateOutOfHull(points, values, {0.0386244370, 3.7878373223, 1.0080726566});
+
+    // Query 4
+    validateInterpolation(points, values, {3.7018512513, 0.5737733461, 2.2291128968}, 4.3944733965, "standard");
+
+    // Query 5
+    validateInterpolation(points, values, {1.3922615250, 1.0521106495, 1.8255455372}, 2.7600710419, "standard");
+
+    // Query 6
+    validateInterpolation(points, values, {3.9789233958, 0.4488841316, 3.3046647626}, 5.2846225310, "standard");
+
+    // Query 7
+    validateInterpolation(points, values, {1.1149025765, 2.3042028857, 3.1028918392}, 4.1024691731, "standard");
+
+    // Query 8
+    validateInterpolation(points, values, {0.8000540538, 4.6425284554, 3.2512169203}, 5.8512129354, "standard");
+
+}
+
+// Test Case: 7D_High_Dimension
+// Description: Performance test with 20 7D points
+// Values Type: scalar
+TEST_F(SciPyReferenceTest, 7D_High_Dimension) {
+    std::vector<std::vector<double>> points = {
+        {-0.3533303569, -0.5395057794, 0.5875577395, 0.2488393614, 0.9508209338, 0.5177717813, -0.9787599001},
+        {-0.9505460723, -0.7779199880, 0.0762987505, -0.9090853298, 0.1031406926, 0.4567300915, -0.4032432698},
+        {0.4662304461, 0.2810513620, -0.5587805862, -0.7457662313, -0.3450536525, -0.1701134779, -0.7242042882},
+        {0.1823535759, -0.2589996819, 0.1918510970, 0.5736983331, 0.6928797610, 0.0009540810, 0.8213209102},
+        {-0.0134333845, 0.7037289945, 0.6428231432, -0.5708398045, -0.6131725712, -0.7308462678, 0.6016692140},
+        {0.5382712153, -0.5746838311, 0.5204239086, 0.4812611472, 0.7257322644, -0.0904187641, 0.2954878492},
+        {-0.3428176235, 0.1844770896, -0.3995320899, 0.1430312489, -0.5362715627, 0.5800423694, 0.1113055819},
+        {-0.2072091195, -0.7422243013, 0.7777251529, 0.4392276178, -0.0185022418, -0.9462642582, 0.5296459153},
+        {0.1200195211, 0.5443623443, -0.6022735916, 0.8586507986, 0.5681537671, 0.0562442506, -0.5804838297},
+        {0.3670092211, 0.8034706716, 0.1976214534, -0.9512921198, -0.2254521004, 0.0417061994, 0.7679594583},
+        {-0.6353132078, -0.0186907784, 0.9418752876, 0.0662000068, -0.4515682336, 0.6520061644, -0.7872890169},
+        {-0.1659152222, 0.1891955210, -0.2845697878, 0.6813483798, 0.7268114041, 0.8543712635, 0.2332824800},
+        {0.0236944940, -0.1048824368, 0.3180006356, -0.6170940631, 0.8370465277, -0.5282351935, 0.5428640844},
+        {0.0025592940, 0.2749315587, -0.3696795922, 0.3615496997, -0.3585483554, 0.3157306980, -0.8774258429},
+        {-0.3644725334, -0.4011702832, 0.4938112190, 0.9065220798, 0.5281338937, 0.1383614957, -0.1471619342},
+        {0.8922912494, 0.4258776240, -0.8615863603, 0.7452520529, -0.5632162335, -0.4043154528, 0.0899911090},
+        {0.8879971519, -0.2581515073, 0.3304143279, 0.1372543817, 0.7788174804, -0.7824676546, 0.6398058125},
+        {0.0849949170, 0.4194152058, -0.8513551699, -0.2848772897, -0.6145076177, 0.0487491868, -0.4303375852},
+        {0.6807002807, -0.2666971474, 0.7374887442, -0.7457607733, 0.2251248128, -0.7384969771, 0.2872423750},
+        {0.8359429260, -0.8781477297, -0.3655966260, -0.1354661570, -0.0828851094, -0.9117039135, 0.0087147941},
+    };
+
+    std::vector<double> values = {2.3351048048, -5.4804499926, -11.4464526609, 11.7540704977, -2.2001211490, 8.0297835498, 0.9777007573, 0.3358528566, 1.9513741600, 3.2603393471, -1.4390961748, 12.4774219372, 3.1154253425, -5.1507560549, 6.3814137799, -2.4717404933, 5.5898768094, -8.5621554044, -1.9179320482, -8.3826525088};
+
+    // Query 1
+    validateOutOfHull(points, values, {-0.0320783518, -0.4135244539, -0.6135724559, 0.4852330160, 0.4013624757, 0.3477054190, -0.3567454891});
+
+    // Query 2
+    validateOutOfHull(points, values, {0.3894958826, -0.4700845383, 0.5555389242, 0.8844352247, -0.2176649465, -0.9061827670, -0.8326125990});
+
+    // Query 3
+    validateOutOfHull(points, values, {-0.0174784547, -0.8977992494, -0.5354523623, 0.7659065469, -0.8887902757, -0.9950810690, 0.5300866683});
+
+    // Query 4
+    validateOutOfHull(points, values, {0.2610486528, -0.9896453620, 0.5900831631, -0.4151834123, -0.0749673015, 0.2477083791, 0.4966968533});
+
+    // Query 5
+    validateOutOfHull(points, values, {0.4626083280, -0.8896224484, -0.2110994827, 0.1379477818, 0.3729926823, -0.6359537779, -0.9111755469});
 
 }
 
