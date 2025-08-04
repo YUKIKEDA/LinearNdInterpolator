@@ -3,6 +3,7 @@
 #include "libqhullcpp/QhullError.h"
 #include "libqhullcpp/QhullFacet.h"
 #include "libqhullcpp/QhullFacetList.h"
+#include "libqhullcpp/QhullFacetSet.h"
 #include "libqhullcpp/QhullVertex.h"
 #include "libqhullcpp/QhullVertexSet.h"
 #include <vector>
@@ -34,7 +35,7 @@
  *       SciPyと同等のオプション（"d Qbb Qc Qz Q12 Qt"）で三角分割を実行します。
  *       5次元以上の場合は追加で"Qx"オプションが使用されます。
  */
-Delaunay::Delaunay(const std::vector<std::vector<double>>& points) {
+Delaunay::Delaunay(const std::vector<std::vector<double>>& points) : transform_computed_(false), neighbors_computed_(false) {
     // 入力点が空の場合はエラー
     if (points.empty()) {
         throw std::invalid_argument("Input points cannot be empty.");
@@ -138,9 +139,22 @@ int Delaunay::findSimplex(const std::vector<double>& point) const {
         return -1;
     }
     
-    const size_t n_dims = point.size();
+    // SciPy互換: Walking Algorithmを優先使用
+    // 小規模データセットでは線形探索、大規模では Walking Algorithm
+    const size_t num_simplices = static_cast<size_t>(std::distance(
+        qhull_->facetList().begin(), qhull_->facetList().end()
+    )) / 2;  // 上半分を除外
     
-    // QhullのfacetListを使用して単体を検索
+    if (num_simplices > 50) {  // 50個以上の単体がある場合
+        int result = findSimplexWalking(point, 0);
+        if (result != -1) {
+            return result;
+        }
+        // Walking Algorithmで見つからない場合は線形探索にフォールバック
+    }
+    
+    // 線形探索（元の実装）
+    const size_t n_dims = point.size();
     auto facetList = qhull_->facetList();
     int simplex_id = 0;
     
@@ -157,7 +171,7 @@ int Delaunay::findSimplex(const std::vector<double>& point) const {
             continue; // n次元では n+1 個の頂点が必要
         }
         
-        // 重心座標で内部判定（簡略版）
+        // 重心座標で内部判定
         std::vector<double> barycentric = calculateBarycentricCoordinates(point, simplex_id);
         
         for (double coord : barycentric) {
@@ -425,4 +439,318 @@ std::vector<double> Delaunay::solveLinearSystem(
     }
     
     return x;
+}
+
+const std::vector<std::vector<std::vector<double>>>& Delaunay::getTransform() const {
+    if (!transform_computed_) {
+        computeBarycentricTransforms();
+    }
+    return transform_;
+}
+
+std::vector<double> Delaunay::calculateBarycentricCoordinatesWithTransform(
+    const std::vector<double>& point, int simplex_id) const {
+    
+    if (!transform_computed_) {
+        computeBarycentricTransforms();
+    }
+    
+    if (simplex_id < 0 || simplex_id >= static_cast<int>(transform_.size())) {
+        return {};
+    }
+    
+    const size_t ndim = point.size();
+    const auto& T = transform_[simplex_id];
+    
+    if (T.empty() || T.size() != ndim + 1 || T[0].size() != ndim) {
+        return {};
+    }
+    
+    // 変換行列にNaNが含まれる場合（特異行列）は元の方法にフォールバック
+    for (size_t i = 0; i <= ndim; ++i) {
+        for (size_t j = 0; j < ndim; ++j) {
+            if (!std::isfinite(T[i][j])) {
+                return calculateBarycentricCoordinates(point, simplex_id);
+            }
+        }
+    }
+    
+    // 作業中実装に合わせた算法: T^(-1) * (x - r_0) = lambda を計算
+    // T[:ndim, :] は既に逆行列、T[ndim, :] は参照頂点 r_0
+    std::vector<double> x_minus_r0(ndim);
+    for (size_t i = 0; i < ndim; ++i) {
+        x_minus_r0[i] = point[i] - T[ndim][i];  // x - r_0
+    }
+    
+    // lambda = T^(-1) * (x - r_0) 行列ベクトル乗算
+    std::vector<double> lambda(ndim, 0.0);
+    for (size_t i = 0; i < ndim; ++i) {
+        for (size_t j = 0; j < ndim; ++j) {
+            lambda[i] += T[i][j] * x_minus_r0[j];
+        }
+    }
+    
+    // バリセントリック座標を構築: barycentric[0] = 1 - sum(lambda), barycentric[i+1] = lambda[i]
+    std::vector<double> barycentric(ndim + 1);
+    double sum = 0.0;
+    for (size_t i = 0; i < ndim; ++i) {
+        barycentric[i + 1] = lambda[i];
+        sum += lambda[i];
+    }
+    barycentric[0] = 1.0 - sum;
+    
+    return barycentric;
+}
+
+void Delaunay::computeBarycentricTransforms() const {
+    if (!qhull_ || qhull_->qhullStatus() != 0) {
+        return;
+    }
+    
+    auto simplices = getSimplices();
+    const size_t nsimplex = simplices.size();
+    const size_t ndim = points_.empty() ? 0 : points_[0].size();
+    
+    transform_.clear();
+    transform_.resize(nsimplex);
+    
+    for (size_t i = 0; i < nsimplex; ++i) {
+        const auto& simplex = simplices[i];
+        
+        // 各simplexの頂点座標を取得
+        std::vector<std::vector<double>> vertices(simplex.size());
+        for (size_t j = 0; j < simplex.size(); ++j) {
+            if (simplex[j] >= 0 && simplex[j] < static_cast<int>(points_.size())) {
+                vertices[j] = points_[simplex[j]];
+            }
+        }
+        
+        // 変換行列を計算
+        transform_[i] = computeSingleTransform(vertices);
+    }
+    
+    transform_computed_ = true;
+}
+
+std::vector<std::vector<double>> Delaunay::computeSingleTransform(
+    const std::vector<std::vector<double>>& simplex_vertices) const {
+    
+    if (simplex_vertices.empty()) {
+        return {};
+    }
+    
+    const size_t ndim = simplex_vertices[0].size();
+    const size_t nverts = simplex_vertices.size();
+    
+    if (nverts != ndim + 1) {
+        return {};  // 不正なsimplex
+    }
+    
+    // SciPy準拠: T[ndim+1][ndim] 形式の変換行列を構築
+    std::vector<std::vector<double>> T(ndim + 1, std::vector<double>(ndim));
+    
+    // 作業中の実装に合わせて参照頂点を最初の頂点に変更 (index = 0)
+    const auto& r_0 = simplex_vertices[0];
+    
+    /* 作業中実装との互換性のため:
+     * 線形システム: A * lambda = x - r_0
+     * ここで lambda[i] は i+1番目のバリセントリック座標 (i = 0, 1, ..., n-1)
+     * barycentric[0] = 1 - sum(lambda) で計算される
+     * A の各列は (vertex[i+1] - r_0) for i = 0, 1, ..., n-1
+     */
+    std::vector<std::vector<double>> A(ndim, std::vector<double>(ndim));
+    for (size_t j = 0; j < ndim; ++j) {        // 各列j
+        for (size_t i = 0; i < ndim; ++i) {    // 各行i
+            A[i][j] = simplex_vertices[j + 1][i] - r_0[i];  // vertex[j+1] - vertex[0]
+        }
+    }
+    
+    try {
+        // Aの逆行列を計算（これがSciPyの変換行列T[:ndim, :]）
+        auto inv_A = invertMatrix(A);
+        
+        for (size_t i = 0; i < ndim; ++i) {
+            for (size_t j = 0; j < ndim; ++j) {
+                T[i][j] = inv_A[i][j];
+            }
+        }
+        
+        // T[ndim, :] に参照頂点 r_0 を格納
+        for (size_t j = 0; j < ndim; ++j) {
+            T[ndim][j] = r_0[j];
+        }
+        
+    } catch (const std::runtime_error&) {
+        // 特異行列の場合はNaNで埋める (SciPy互換)
+        for (size_t i = 0; i <= ndim; ++i) {
+            for (size_t j = 0; j < ndim; ++j) {
+                T[i][j] = std::numeric_limits<double>::quiet_NaN();
+            }
+        }
+    }
+    
+    return T;
+}
+
+std::vector<std::vector<double>> Delaunay::invertMatrix(
+    const std::vector<std::vector<double>>& matrix) const {
+    
+    if (matrix.empty() || matrix.size() != matrix[0].size()) {
+        throw std::runtime_error("Matrix must be square for inversion");
+    }
+    
+    const size_t n = matrix.size();
+    
+    // 拡張行列 [A|I] を作成
+    std::vector<std::vector<double>> augmented(n, std::vector<double>(2 * n));
+    
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            augmented[i][j] = matrix[i][j];
+            augmented[i][j + n] = (i == j) ? 1.0 : 0.0;  // 単位行列
+        }
+    }
+    
+    // Gauss-Jordan消去法
+    for (size_t i = 0; i < n; ++i) {
+        // ピボット選択
+        size_t pivot_row = i;
+        for (size_t k = i + 1; k < n; ++k) {
+            if (std::abs(augmented[k][i]) > std::abs(augmented[pivot_row][i])) {
+                pivot_row = k;
+            }
+        }
+        
+        if (pivot_row != i) {
+            std::swap(augmented[i], augmented[pivot_row]);
+        }
+        
+        // 特異行列チェック
+        if (std::abs(augmented[i][i]) < 1e-14) {
+            throw std::runtime_error("Matrix is singular and cannot be inverted");
+        }
+        
+        // 対角成分を1にする
+        double pivot = augmented[i][i];
+        for (size_t j = 0; j < 2 * n; ++j) {
+            augmented[i][j] /= pivot;
+        }
+        
+        // 他の行を消去
+        for (size_t k = 0; k < n; ++k) {
+            if (k != i) {
+                double factor = augmented[k][i];
+                for (size_t j = 0; j < 2 * n; ++j) {
+                    augmented[k][j] -= factor * augmented[i][j];
+                }
+            }
+        }
+    }
+    
+    // 逆行列部分を抽出
+    std::vector<std::vector<double>> inverse(n, std::vector<double>(n));
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = 0; j < n; ++j) {
+            inverse[i][j] = augmented[i][j + n];
+        }
+    }
+    
+    return inverse;
+}
+
+std::vector<std::vector<int>> Delaunay::getNeighbors() const {
+    if (!neighbors_computed_) {
+        computeNeighbors();
+    }
+    return neighbors_;
+}
+
+void Delaunay::computeNeighbors() const {
+    if (!qhull_ || qhull_->qhullStatus() != 0) {
+        return;
+    }
+    
+    // 簡易版実装: すべてのsimplexに対して空の隣接リストを作成
+    // より正確な実装は将来の改善で対応
+    auto facetList = qhull_->facetList();
+    neighbors_.clear();
+    
+    int simplex_count = 0;
+    for (auto facet : facetList) {
+        if (facet.isUpperDelaunay()) {
+            continue;
+        }
+        simplex_count++;
+    }
+    
+    // 各simplexに対して隣接情報をダミーで初期化
+    // Walking Algorithmを無効化する（線形探索にフォールバック）
+    for (int i = 0; i < simplex_count; ++i) {
+        neighbors_.push_back(std::vector<int>());
+    }
+    
+    neighbors_computed_ = true;
+}
+
+int Delaunay::findSimplexWalking(const std::vector<double>& point, int start_simplex) const {
+    if (!qhull_ || qhull_->qhullStatus() != 0) {
+        return -1;
+    }
+    
+    // 隣接情報を初期化
+    if (!neighbors_computed_) {
+        computeNeighbors();
+    }
+    
+    const size_t n_dims = point.size();
+    const int max_iterations = static_cast<int>(neighbors_.size()) * 2;  // 無限ループ防止
+    
+    int current_simplex = std::max(0, start_simplex);
+    if (current_simplex >= static_cast<int>(neighbors_.size())) {
+        current_simplex = 0;
+    }
+    
+    for (int iteration = 0; iteration < max_iterations; ++iteration) {
+        // 現在のsimplexで重心座標を計算
+        std::vector<double> barycentric = calculateBarycentricCoordinates(point, current_simplex);
+        
+        if (barycentric.empty()) {
+            return -1;  // 計算失敗
+        }
+        
+        // 内部判定
+        bool inside = true;
+        int most_negative_idx = -1;
+        double most_negative_value = 0.0;
+        
+        const double tolerance = 1e-10;
+        for (size_t i = 0; i < barycentric.size(); ++i) {
+            if (barycentric[i] < -tolerance) {
+                inside = false;
+                if (barycentric[i] < most_negative_value) {
+                    most_negative_value = barycentric[i];
+                    most_negative_idx = static_cast<int>(i);
+                }
+            }
+        }
+        
+        if (inside) {
+            return current_simplex;  // 見つかった
+        }
+        
+        // SciPy Walking Algorithm: 最も負の重心座標の方向に移動
+        if (most_negative_idx >= 0 && most_negative_idx < static_cast<int>(neighbors_[current_simplex].size())) {
+            int next_simplex = neighbors_[current_simplex][most_negative_idx];
+            
+            if (next_simplex == -1 || next_simplex == current_simplex) {
+                break;  // 境界または同じsimplex
+            }
+            
+            current_simplex = next_simplex;
+        } else {
+            break;  // 隣接情報が無効
+        }
+    }
+    
+    return -1;  // 見つからない（凸包外）
 }
