@@ -81,9 +81,21 @@ Delaunay::Delaunay(const std::vector<std::vector<double>>& points) : transform_c
     // 点データを平坦化し、内部で保持
     points_ = points;
     std::vector<double> flat_points(n_points * n_dims);
+    
+    // 境界ボックスを初期化
+    min_bound_.resize(n_dims, std::numeric_limits<double>::max());
+    max_bound_.resize(n_dims, std::numeric_limits<double>::lowest());
+    
+    // SciPy準拠のparaboloid設定
+    paraboloid_scale_ = 1.0;
+    paraboloid_shift_ = 0.0;
+    
     for (size_t i = 0; i < n_points; ++i) {
         for (size_t j = 0; j < n_dims; ++j) {
             flat_points[i * n_dims + j] = points[i][j];
+            // 境界ボックスを更新
+            min_bound_[j] = std::min(min_bound_[j], points[i][j]);
+            max_bound_[j] = std::max(max_bound_[j], points[i][j]);
         }
     }
 
@@ -135,48 +147,82 @@ Delaunay::~Delaunay() = default;
  * 
  * @see calculateBarycentricCoordinates()
  */
-int Delaunay::findSimplex(const std::vector<double>& point) const {
+int Delaunay::findSimplex(std::vector<double>& barycentric_coords,
+                           const std::vector<double>& point, 
+                           int& start_simplex, 
+                           double eps, 
+                           double eps_broad) const {
+    // SciPy _find_simplex完全準拠実装
     if (!qhull_ || qhull_->qhullStatus() != 0) {
         return -1;
     }
     
-    // SciPy準拠の実装: Walking Algorithm → Brute Force フォールバック
-    
-    // Step 1: Walking Algorithm を試行
-    int result = findSimplexWalking(point, 0);
-    if (result != -1) {
-        return result;
+    // 入力検証
+    if (point.size() != points_[0].size()) {
+        throw std::invalid_argument("Point dimension must match triangulation dimension");
     }
     
-    // Step 2: Walking Algorithm失敗時、Brute Force検索にフォールバック
-    return findSimplexBruteForce(point);
+    const size_t ndim = points_[0].size();
+    barycentric_coords.resize(ndim + 1);
+    
+    // SciPy _is_point_fully_outside相当のチェック
+    for (size_t i = 0; i < ndim; ++i) {
+        if (point[i] < min_bound_[i] - eps || point[i] > max_bound_[i] + eps) {
+            return -1;
+        }
+    }
+    
+    auto simplices = getSimplices();
+    if (simplices.empty()) {
+        return -1;
+    }
+    
+    // start_simplexの範囲チェック
+    int isimplex = start_simplex;
+    if (isimplex < 0 || isimplex >= static_cast<int>(simplices.size())) {
+        isimplex = 0;
+    }
+    
+    // Step 1: 点をparaboloid上に投影
+    std::vector<double> lifted_point;
+    liftPointToParaboloid(point, lifted_point);
+    
+    // Step 2: Walking Algorithm - positive facetを探索
+    double best_dist = calculatePlaneDistance(isimplex, lifted_point.data(), ndim + 1);
+    bool changed = true;
+    
+    computeNeighbors();  // 隣接情報を確保
+    
+    while (changed) {
+        if (best_dist > 0) {
+            break;  // positive facetを発見
+        }
+        
+        changed = false;
+        
+        // すべての隣接simplexをチェック
+        if (isimplex < static_cast<int>(neighbors_.size())) {
+            for (size_t k = 0; k <= ndim && k < neighbors_[isimplex].size(); ++k) {
+                int ineigh = neighbors_[isimplex][k];
+                if (ineigh == -1) continue;
+                
+                double dist = calculatePlaneDistance(ineigh, lifted_point.data(), ndim + 1);
+                
+                // SciPy準拠: epsを考慮した比較（無限ループ防止）
+                if (dist > best_dist + eps * (1.0 + std::abs(best_dist))) {
+                    isimplex = ineigh;
+                    best_dist = dist;
+                    changed = true;
+                    break;  // SciPy準拠: ループの中途でジャンプ
+                }
+            }
+        }
+    }
+    
+    // Step 3: 現在のsimplex近働にいるので、Directed Searchで正確な位置を探索
+    start_simplex = isimplex;
+    return findSimplexDirected(point, isimplex, eps, eps_broad, barycentric_coords);
 }
-
-/**
- * @brief 指定された点の重心座標を計算
- * 
- * 与えられた点について、指定された単体における重心座標を計算します。
- * 重心座標は点が単体内部にあるかの判定や補間計算に使用されます。
- * 
- * 重心座標λ = (λ₀, λ₁, ..., λₙ)は以下の性質を満たします：
- * - Σλᵢ = 1
- * - point = Σλᵢ * vertexᵢ
- * - λᵢ ≥ 0 (すべてのi) の場合、点は単体内部にある
- * 
- * @param point 重心座標を計算する点
- * @param simplex_id 対象となる単体のインデックス
- * 
- * @return std::vector<double> 重心座標のベクトル。
- *         サイズは次元数+1で、各要素が対応する頂点への重みを表します。
- *         計算に失敗した場合（不正なsimplex_idや特異行列など）は空のベクトルを返します。
- * 
- * @note 計算は線形システム A * λ = b を解くことで実行されます。
- *       ここで、Aは頂点差分行列、bは点と基準頂点の差分ベクトルです。
- * 
- * @see solveLinearSystem(), findSimplex()
- */
-// 古いcalculateBarycentricCoordinatesメソッドは削除
-// SciPy準拠のcalculateBarycentricCoordinatesWithTransformに統一
 
 /**
  * @brief 三角分割の全単体を取得
@@ -252,33 +298,6 @@ std::vector<std::vector<int>> Delaunay::getSimplices() const {
     
     return simplices;
 }
-
-/**
- * @brief 線形システム Ax = b を解く
- * 
- * ガウス消去法を使用して線形システムを解きます。
- * 重心座標の計算において、頂点差分行列と点差分ベクトルから
- * 重心座標の係数を求めるために使用されます。
- * 
- * アルゴリズム：
- * 1. 部分ピボット選択付きガウス消去法で前進消去
- * 2. 後退代入で解を求める
- * 3. 特異行列の場合は零ベクトルを返す
- * 
- * @param A 係数行列（n×n）。このメソッド内で変更されません。
- * @param b 右辺ベクトル（長さn）
- * 
- * @return std::vector<double> 解ベクトル x。
- *         行列が特異または不正な場合は零ベクトルを返します。
- * 
- * @note 数値安定性のため部分ピボット選択を使用し、
- *       1e-12未満の要素は特異とみなします。
- *       この許容値は重心座標計算の精度要件に基づいています。
- * 
- * @see calculateBarycentricCoordinates()
- */
-// 古いsolveLinearSystemメソッドは削除済み
-// SciPy準拠のinvertMatrixRobustに統一
 
 const std::vector<std::vector<std::vector<double>>>& Delaunay::getTransform() const {
     if (!transform_computed_) {
@@ -563,7 +582,7 @@ void Delaunay::computeNeighbors() const {
             if (vertex_index >= static_cast<int>(neighbors_[i].size())) break;
             
             // この頂点を含まない隣接facetを探す（SciPy方式）
-            // 暫定実装：全facetを検索して隣接を判定
+            // 全facetを検索して隣接を判定
             for (size_t j = 0; j < valid_facets.size(); ++j) {
                 if (i == j) continue;
                 
@@ -604,114 +623,113 @@ void Delaunay::computeNeighbors() const {
     neighbors_computed_ = true;
 }
 
-int Delaunay::findSimplexWalking(const std::vector<double>& point, int start_simplex) const {
-    if (!qhull_ || qhull_->qhullStatus() != 0) {
-        return -1;
+
+
+/**
+ * @brief SciPy準拠のDirected Search実装
+ */
+int Delaunay::findSimplexDirected(const std::vector<double>& point,
+                                  int start_simplex,
+                                  double eps,
+                                  double eps_broad,
+                                  std::vector<double>& barycentric_coords) const {
+    // SciPy _find_simplex_directed完全準拠実装
+    const size_t ndim = points_[0].size();
+    auto simplices = getSimplices();
+    
+    int isimplex = start_simplex;
+    if (isimplex < 0 || isimplex >= static_cast<int>(simplices.size())) {
+        isimplex = 0;
     }
     
-    // 隣接情報を初期化
-    if (!neighbors_computed_) {
-        computeNeighbors();
-    }
+    // SciPy準拠の最大イテレーション数
+    const int max_iterations = 1 + static_cast<int>(simplices.size()) / 4;
     
-    // SciPy準拠のWalking Algorithm実装
-    const double eps = 1e-12;  // SciPy互換の許容誤差
-    const int max_iterations = static_cast<int>(neighbors_.size()) * 2;  // 無限ループ防止
-    
-    int current_simplex = std::max(0, start_simplex);
-    if (current_simplex >= static_cast<int>(neighbors_.size())) {
-        current_simplex = 0;
-    }
-    
-    for (int iteration = 0; iteration < max_iterations; ++iteration) {
-        // SciPy準拠の変換行列を使った高速バリセントリック座標計算
-        std::vector<double> barycentric = calculateBarycentricCoordinatesWithTransform(point, current_simplex);
-        
-        if (barycentric.empty()) {
-            return -1;  // 計算失敗
+    for (int cycle_k = 0; cycle_k < max_iterations; ++cycle_k) {
+        if (isimplex == -1) {
+            break;
         }
         
-        // SciPy準拠の内部判定: -eps <= c <= 1+eps の範囲チェック
+        // 現在のsimplexに対して重心座標を計算
         bool inside = true;
-        int most_negative_idx = -1;
-        double most_negative_value = -eps;  // 許容誤差を考慮
         
-        for (size_t i = 0; i < barycentric.size(); ++i) {
-            if (barycentric[i] < -eps) {
-                inside = false;
-                if (barycentric[i] < most_negative_value) {
-                    most_negative_value = barycentric[i];
-                    most_negative_idx = static_cast<int>(i);
+        for (size_t k = 0; k <= ndim; ++k) {
+            // SciPy _barycentric_coordinate_single相当の処理
+            calculateBarycentricCoordinateSingle(isimplex, point, barycentric_coords, static_cast<int>(k));
+            
+            if (barycentric_coords[k] < -eps) {
+                // ターゲット点は隣接simplex kの方向にある
+                if (isimplex < static_cast<int>(neighbors_.size()) && 
+                    k < neighbors_[isimplex].size()) {
+                    int m = neighbors_[isimplex][k];
+                    if (m == -1) {
+                        // 点は三角分割の外側
+                        return -1;
+                    }
+                    isimplex = m;
+                    inside = false;
+                    break;
                 }
-            } else if (barycentric[i] > 1.0 + eps) {
-                inside = false;  // 上限チェックも追加（SciPy準拠）
+            } else if (barycentric_coords[k] <= 1.0 + eps) {
+                // このsimplex内にいる
+                continue;
+            } else {
+                // 外側または退化simplex
+                inside = false;
+                break;
             }
         }
         
         if (inside) {
-            return current_simplex;  // 見つけた
+            // 正しいsimplexを発見！
+            return isimplex;
+        } else if (isimplex == -1) {
+            // 退化simplexに出くわした -> brute forceにフォールバック
+            return findSimplexBruteForceWithEps(point, eps_broad, barycentric_coords);
         }
-        
-        // SciPy Walking Algorithm: 最も負のバリセントリック座標の方向に移動
-        if (most_negative_idx >= 0 && most_negative_idx < static_cast<int>(neighbors_[current_simplex].size())) {
-            int next_simplex = neighbors_[current_simplex][most_negative_idx];
-            
-            if (next_simplex == -1) {
-                // 境界に到達（凸包外）
-                return -1;
-            }
-            
-            if (next_simplex == current_simplex) {
-                // 同じsimplexに戻る（デッドロック回避）
-                break;
-            }
-            
-            if (next_simplex >= 0 && next_simplex < static_cast<int>(neighbors_.size())) {
-                current_simplex = next_simplex;
-            } else {
-                break;  // 無効なsimplex index
-            }
-        } else {
-            break;  // 隣接情報が無効
-        }
+        // 別のsimplexにホップしたので継続
     }
     
-    return -1;  // 見つからない（Walking Algorithm失敗）
+    // アルゴリズムが収束しなかった -> brute forceにフォールバック
+    return findSimplexBruteForceWithEps(point, eps_broad, barycentric_coords);
 }
 
-int Delaunay::findSimplexBruteForce(const std::vector<double>& point) const {
-    if (!qhull_ || qhull_->qhullStatus() != 0) {
-        return -1;
+/**
+ * @brief Paraboloid上での平面距離計算（SciPy _distplane完全準拠）
+ */
+double Delaunay::calculatePlaneDistance(int simplex_id, const double* lifted_point, size_t dim) const {
+    // SciPy _distplane完全準拠実装
+    // dist = equations[isimplex*(ndim+2) + ndim+1] + Σ(equations[isimplex*(ndim+2) + k] * point[k])
+    
+    if (simplex_id < 0 || simplex_id >= static_cast<int>(getSimplices().size())) {
+        return -std::numeric_limits<double>::max();
     }
     
-    // SciPy準拠のBrute Force検索
-    // 全simplexを順次チェック
-    auto simplices = getSimplices();
-    const double eps = 1e-12;  // SciPy互換の許容誤差
+    const size_t ndim = points_[0].size();
     
-    for (size_t i = 0; i < simplices.size(); ++i) {
-        // 変換行列を使った高速バリセントリック座標計算
-        std::vector<double> barycentric = calculateBarycentricCoordinatesWithTransform(point, static_cast<int>(i));
-        
-        if (barycentric.empty()) {
-            continue;  // 計算失敗時は次のsimplexへ
-        }
-        
-        // SciPy準拠の内部判定: すべての座標が -eps <= c <= 1+eps の範囲内
-        bool inside = true;
-        for (double coord : barycentric) {
-            if (coord < -eps || coord > 1.0 + eps) {
-                inside = false;
-                break;
-            }
-        }
-        
-        if (inside) {
-            return static_cast<int>(i);
-        }
+    // Qhullから直接面方程式情報を取得
+    auto facets = qhull_->facetList();
+    if (facets.size() <= static_cast<size_t>(simplex_id)) {
+        return -std::numeric_limits<double>::max();
     }
     
-    return -1;  // 凸包外
+    auto facet_it = facets.begin();
+    std::advance(facet_it, simplex_id);
+    auto facet = *facet_it;
+    
+    // 面方程式の係数を取得（SciPy準拠）
+    auto hyperplane = facet.hyperplane();
+    auto coordinates = hyperplane.coordinates();
+    
+    // SciPy _distplane: dist = offset + Σ(normal[k] * point[k])
+    double dist = hyperplane.offset();
+    
+    // ndim+1個の座標を使用（paraboloid投影のため）
+    for (size_t k = 0; k <= ndim; ++k) {
+        dist += coordinates[k] * lifted_point[k];
+    }
+    
+    return dist;
 }
 
 bool Delaunay::isMatrixSingular(const std::vector<std::vector<double>>& matrix) const {
@@ -870,4 +888,81 @@ double Delaunay::calculateDeterminant(const std::vector<std::vector<double>>& ma
     }
     
     return det;
+}
+
+void Delaunay::liftPointToParaboloid(const std::vector<double>& point, std::vector<double>& lifted_point) const {
+    // SciPy _lift_point完全準拠実装
+    const size_t ndim = point.size();
+    lifted_point.resize(ndim + 1);
+    
+    // 通常座標をコピー
+    double sum_squares = 0.0;
+    for (size_t i = 0; i < ndim; ++i) {
+        lifted_point[i] = point[i];
+        sum_squares += point[i] * point[i];
+    }
+    
+    // paraboloid座標を計算
+    lifted_point[ndim] = sum_squares * paraboloid_scale_ + paraboloid_shift_;
+}
+
+void Delaunay::calculateBarycentricCoordinateSingle(int simplex_id, const std::vector<double>& point, 
+                                                    std::vector<double>& barycentric, int coordinate_index) const {
+    // SciPy _barycentric_coordinate_single完全準拠実装
+    const size_t ndim = point.size();
+    const auto& transform = getTransform();
+    
+    if (simplex_id < 0 || simplex_id >= static_cast<int>(transform.size())) {
+        return;
+    }
+    
+    const auto& T = transform[simplex_id];
+    if (T.empty() || T.size() != ndim + 1 || T[0].size() != ndim) {
+        return;
+    }
+    
+    if (coordinate_index == static_cast<int>(ndim)) {
+        // 最後の座標: c[ndim] = 1.0 - Σ(c[j]) for j=0..ndim-1
+        barycentric[ndim] = 1.0;
+        for (size_t j = 0; j < ndim; ++j) {
+            barycentric[ndim] -= barycentric[j];
+        }
+    } else if (coordinate_index >= 0 && coordinate_index < static_cast<int>(ndim)) {
+        // c[i] = Σ(transform[i][j] * (x[j] - transform[ndim][j]))
+        barycentric[coordinate_index] = 0.0;
+        for (size_t j = 0; j < ndim; ++j) {
+            barycentric[coordinate_index] += T[coordinate_index][j] * (point[j] - T[ndim][j]);
+        }
+    }
+}
+
+int Delaunay::findSimplexBruteForceWithEps(const std::vector<double>& point,
+                                            double eps_broad,
+                                            std::vector<double>& barycentric_coords) const {
+    // SciPy _find_simplex_bruteforce完全準拠実装
+    auto simplices = getSimplices();
+    
+    for (size_t i = 0; i < simplices.size(); ++i) {
+        std::vector<double> barycentric = calculateBarycentricCoordinatesWithTransform(point, static_cast<int>(i));
+        
+        if (barycentric.empty()) {
+            continue;
+        }
+        
+        // SciPy準拠の内部判定: 全ての座標が [-eps_broad, 1+eps_broad] の範囲内
+        bool inside = true;
+        for (double coord : barycentric) {
+            if (coord < -eps_broad || coord > 1.0 + eps_broad) {
+                inside = false;
+                break;
+            }
+        }
+        
+        if (inside) {
+            barycentric_coords = barycentric;
+            return static_cast<int>(i);
+        }
+    }
+    
+    return -1;  // 見つからなかった
 }

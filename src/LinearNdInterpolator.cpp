@@ -201,13 +201,19 @@ std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
     // 値の次元数を取得
     const size_t n_values = values_[0].size();
     
+    // SciPy準拠のeps設定
+    double eps = 100.0 * std::numeric_limits<double>::epsilon();
+    double eps_broad = std::sqrt(std::numeric_limits<double>::epsilon());
+    int start_simplex = 0;
+    
     // 各入力点に対して補間を実行
     for (const auto& q : query) {
-        // 単体（シンプレックス）を見つける
-        int isimplex = delaunay_->findSimplex(q);
-        
         // 結果ベクトルを初期化
         std::vector<double> interpolated_values(n_values, 0.0);
+        
+        // SciPy準拠のfindSimplex呼び出し（重心座標も同時に取得）
+        std::vector<double> barycentric;
+        int isimplex = delaunay_->findSimplex(barycentric, q, start_simplex, eps, eps_broad);
         
         // 凸包外の処理
         if (isimplex == -1) {
@@ -218,9 +224,6 @@ std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
             results.push_back(interpolated_values);
             continue;
         }
-        
-        // SciPy互換の最適化された変換行列を使用
-        std::vector<double> barycentric = delaunay_->calculateBarycentricCoordinatesWithTransform(q, isimplex);
         
         if (barycentric.empty()) {
             // 重心座標の計算に失敗した場合もNaNを設定

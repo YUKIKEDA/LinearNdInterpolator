@@ -66,16 +66,24 @@ public:
     Delaunay& operator=(Delaunay&&) = delete;
     
     /**
-     * @brief 指定された点を含むsimplexのIDを検索
+     * @brief 指定された点を含むsimplexのIDを検索（SciPy _find_simplex準拠）
      * 
      * 与えられた点がどのsimplex（N次元三角形）に含まれるかを判定します。
-     * SciPyのDelaunay.find_simplexメソッドと同等の機能を提供します。
+     * SciPyの内部C実装 _find_simplex と同等のインターフェースを提供します。
      * 
+     * @param barycentric_coords 出力用重心座標（計算結果が格納される）
      * @param point 検索対象の点の座標（N次元ベクター）
+     * @param start_simplex 検索開始simplex（参照渡しで更新される）
+     * @param eps 基本許容誤差（SciPy準拠: 100*DBL_EPSILON）
+     * @param eps_broad broad検索用許容誤差（SciPy準拠: sqrt(DBL_EPSILON)）
      * @return 点を含むsimplexのID（見つからない場合は-1）
      * @throws std::invalid_argument pointの次元が構築時の点群と一致しない場合
      */
-    int findSimplex(const std::vector<double>& point) const;
+    int findSimplex(std::vector<double>& barycentric_coords,
+                    const std::vector<double>& point, 
+                    int& start_simplex, 
+                    double eps, 
+                    double eps_broad) const;
     
     // 古いcalculateBarycentricCoordinatesメソッドは削除済み
     // SciPy準拠のcalculateBarycentricCoordinatesWithTransformを使用
@@ -136,7 +144,10 @@ public:
      * @param start_simplex 検索開始点（省略時は0）
      * @return 点を含むsimplexのID（見つからない場合は-1）
      */
-    int findSimplexWalking(const std::vector<double>& point, int start_simplex = 0) const;
+    int findSimplexWalkingWithEps(const std::vector<double>& point, 
+                                  int start_simplex, 
+                                  double eps,
+                                  std::vector<double>& barycentric_coords) const;
     
     /**
      * @brief Brute Force単体検索（SciPy準拠フォールバック）
@@ -147,7 +158,34 @@ public:
      * @param point 検索対象の点の座標
      * @return 点を含むsimplexのID（見つからない場合は-1）
      */
-    int findSimplexBruteForce(const std::vector<double>& point) const;
+    int findSimplexBruteForceWithEps(const std::vector<double>& point,
+                                     double eps_broad,
+                                     std::vector<double>& barycentric_coords) const;
+    
+    /**
+     * @brief SciPy準拠のDirected Search実装
+     */
+    int findSimplexDirected(const std::vector<double>& point,
+                           int start_simplex,
+                           double eps,
+                           double eps_broad,
+                           std::vector<double>& barycentric_coords) const;
+    
+    /**
+     * @brief Paraboloid上での平面距離計算（SciPy _distplane完全準拠）
+     */
+    double calculatePlaneDistance(int simplex_id, const double* lifted_point, size_t dim) const;
+    
+    /**
+     * @brief 点をparaboloid上に投影（SciPy _lift_point相当）
+     */
+    void liftPointToParaboloid(const std::vector<double>& point, std::vector<double>& lifted_point) const;
+    
+    /**
+     * @brief 単一barycentric座標計算（SciPy _barycentric_coordinate_single相当）
+     */
+    void calculateBarycentricCoordinateSingle(int simplex_id, const std::vector<double>& point, 
+                                             std::vector<double>& barycentric, int coordinate_index) const;
 
 private:
     /**
@@ -192,6 +230,26 @@ private:
      * @brief 隣接情報が計算済みかどうかのフラグ
      */
     mutable bool neighbors_computed_;
+    
+    /**
+     * @brief 点群の境界ボックス（最小値）
+     */
+    std::vector<double> min_bound_;
+    
+    /**
+     * @brief 点群の境界ボックス（最大値）
+     */
+    std::vector<double> max_bound_;
+    
+    /**
+     * @brief SciPy準拠のparaboloid scaling factor
+     */
+    double paraboloid_scale_;
+    
+    /**
+     * @brief SciPy準拠のparaboloid offset
+     */
+    double paraboloid_shift_;
     
     
     /**
