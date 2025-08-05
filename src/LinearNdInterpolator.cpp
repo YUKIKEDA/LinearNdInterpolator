@@ -194,70 +194,46 @@ std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
         }
     }
 
-    // 結果を格納するベクトルを初期化
-    std::vector<std::vector<double>> results;
-    results.reserve(query.size());
-
-    // 値の次元数を取得
-    const size_t n_values = values_[0].size();
+    // SciPy準拠: 結果配列の事前確保と初期化
+    const size_t nvalues = values_[0].size();
+    const size_t ndim = points_[0].size();
+    std::vector<std::vector<double>> results(query.size(), std::vector<double>(nvalues));
+    
+    // SciPy準拠: ループ外で一度だけsimplicesを取得
+    const auto simplices = delaunay_->getSimplices();
     
     // SciPy準拠のeps設定
     double eps = 100.0 * std::numeric_limits<double>::epsilon();
     double eps_broad = std::sqrt(std::numeric_limits<double>::epsilon());
     int start_simplex = 0;
     
-    // 各入力点に対して補間を実行
-    for (const auto& q : query) {
-        // 結果ベクトルを初期化
-        std::vector<double> interpolated_values(n_values, 0.0);
+    // SciPy準拠: 各入力点に対して補間を実行
+    for (size_t i = 0; i < query.size(); ++i) {
+        const auto& q = query[i];
         
-        // SciPy準拠のfindSimplex呼び出し（重心座標も同時に取得）
+        // 1) Find the simplex - SciPy準拠
         std::vector<double> barycentric;
         int isimplex = delaunay_->findSimplex(barycentric, q, start_simplex, eps, eps_broad);
         
-        // 凸包外の処理
+        // 2) Linear barycentric interpolation - SciPy準拠
         if (isimplex == -1) {
-            // SciPyと同様に、凸包外の場合はNaNを設定
-            for (size_t k = 0; k < n_values; ++k) {
-                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
-            }
-            results.push_back(interpolated_values);
+            // don't extrapolate - SciPy準拠: 凸包外は即座にNaN
+            std::fill(results[i].begin(), results[i].end(), 
+                     std::numeric_limits<double>::quiet_NaN());
             continue;
         }
         
-        if (barycentric.empty()) {
-            // 重心座標の計算に失敗した場合もNaNを設定
-            for (size_t k = 0; k < n_values; ++k) {
-                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
-            }
-            results.push_back(interpolated_values);
-            continue;
-        }
+        // SciPy準拠: 結果をゼロで初期化
+        std::fill(results[i].begin(), results[i].end(), 0.0);
         
-        // 線形重心座標補間を実行
-        auto simplices = delaunay_->getSimplices();
-        if (isimplex >= 0 && isimplex < static_cast<int>(simplices.size())) {
-            const auto& simplex = simplices[isimplex];
-            
-            for (size_t j = 0; j < barycentric.size() && j < simplex.size(); ++j) {
-                int vertex_index = simplex[j];
-                
-                // 頂点インデックスの範囲チェック
-                if (vertex_index >= 0 && vertex_index < static_cast<int>(values_.size())) {
-                    for (size_t k = 0; k < n_values; ++k) {
-                        interpolated_values[k] += barycentric[j] * values_[vertex_index][k];
-                    }
-                }
-            }
-        } else {
-            // 単体インデックスが無効な場合はNaNを設定
-            for (size_t k = 0; k < n_values; ++k) {
-                interpolated_values[k] = std::numeric_limits<double>::quiet_NaN();
+        // SciPy準拠: 線形補間計算 (境界チェック最小化)
+        const auto& simplex = simplices[isimplex];
+        for (size_t j = 0; j < ndim + 1; ++j) {
+            int vertex_index = simplex[j];
+            for (size_t k = 0; k < nvalues; ++k) {
+                results[i][k] += barycentric[j] * values_[vertex_index][k];
             }
         }
-        
-        // 結果を格納
-        results.push_back(interpolated_values);
     }
 
     return results;
