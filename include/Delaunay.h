@@ -125,17 +125,6 @@ public:
         const std::vector<double>& point, int simplex_id) const;
     
     /**
-     * @brief 隣接simplexの情報を取得
-     * 
-     * SciPyのDelaunay.neighborsプロパティと同等の機能を提供します。
-     * 各simplexに隣接するsimplexのIDを返します。
-     * 
-     * @return 隣接関係の2次元配列 [simplex_id][neighbor_index]
-     */
-    std::vector<std::vector<int>> getNeighbors() const;
-    
-    
-    /**
      * @brief Brute Force単体検索（SciPy準拠フォールバック）
      * 
      * Walking Algorithmが失敗した場合のフォールバック検索手法です。

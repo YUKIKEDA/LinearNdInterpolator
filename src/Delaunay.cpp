@@ -532,13 +532,6 @@ std::vector<std::vector<double>> Delaunay::invertMatrix(
     return inverse;
 }
 
-std::vector<std::vector<int>> Delaunay::getNeighbors() const {
-    if (!neighbors_computed_) {
-        computeNeighbors();
-    }
-    return neighbors_;
-}
-
 void Delaunay::computeNeighbors() const {
     if (!qhull_ || qhull_->qhullStatus() != 0) {
         return;
