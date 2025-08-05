@@ -134,20 +134,6 @@ public:
      */
     std::vector<std::vector<int>> getNeighbors() const;
     
-    /**
-     * @brief Walking algorithmを使用した効率的なsimplex検索（SciPy準拠）
-     * 
-     * SciPyのfind_simplexで使用される効率的な検索アルゴリズムです。
-     * 開始simplexから隣接simplexをたどって目標点を含むsimplexを見つけます。
-     * 
-     * @param point 検索対象の点の座標
-     * @param start_simplex 検索開始点（省略時は0）
-     * @return 点を含むsimplexのID（見つからない場合は-1）
-     */
-    int findSimplexWalkingWithEps(const std::vector<double>& point, 
-                                  int start_simplex, 
-                                  double eps,
-                                  std::vector<double>& barycentric_coords) const;
     
     /**
      * @brief Brute Force単体検索（SciPy準拠フォールバック）
