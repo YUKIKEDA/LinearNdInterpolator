@@ -222,11 +222,6 @@ std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
         // SciPy互換の最適化された変換行列を使用
         std::vector<double> barycentric = delaunay_->calculateBarycentricCoordinatesWithTransform(q, isimplex);
         
-        // フォールバック: 変換行列が失敗した場合は元の方法を使用
-        if (barycentric.empty()) {
-            barycentric = delaunay_->calculateBarycentricCoordinates(q, isimplex);
-        }
-        
         if (barycentric.empty()) {
             // 重心座標の計算に失敗した場合もNaNを設定
             for (size_t k = 0; k < n_values; ++k) {

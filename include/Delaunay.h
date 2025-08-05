@@ -77,20 +77,8 @@ public:
      */
     int findSimplex(const std::vector<double>& point) const;
     
-    /**
-     * @brief 指定された点の重心座標を計算
-     * 
-     * 与えられた点について、指定されたsimplex内での重心座標（barycentric coordinates）を計算します。
-     * 重心座標は、simplexの各頂点に対する重みを表し、その合計は1になります。
-     * 
-     * @param point 重心座標を計算する点の座標
-     * @param simplex_id 対象となるsimplexのID
-     * @return 重心座標のベクター（simplex頂点数+1の要素数）
-     * @throws std::invalid_argument simplex_idが無効、またはpointの次元が不正な場合
-     * @throws std::runtime_error 重心座標の計算に失敗した場合
-     */
-    std::vector<double> calculateBarycentricCoordinates(
-        const std::vector<double>& point, int simplex_id) const;
+    // 古いcalculateBarycentricCoordinatesメソッドは削除済み
+    // SciPy準拠のcalculateBarycentricCoordinatesWithTransformを使用
     
     /**
      * @brief 全simplexの頂点インデックス情報を取得
@@ -205,19 +193,6 @@ private:
      */
     mutable bool neighbors_computed_;
     
-    /**
-     * @brief 連立一次方程式を解くヘルパーメソッド
-     * 
-     * 重心座標の計算などで使用される連立一次方程式 Ax = b を解きます。
-     * 
-     * @param A 係数行列（N×N行列）
-     * @param b 定数ベクター（N要素）
-     * @return 解ベクター x（N要素）
-     * @throws std::runtime_error 行列が特異、または解が存在しない場合
-     */
-    std::vector<double> solveLinearSystem(
-        const std::vector<std::vector<double>>& A, 
-        const std::vector<double>& b) const;
     
     /**
      * @brief バリセントリック変換行列を計算

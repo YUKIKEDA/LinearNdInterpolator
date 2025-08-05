@@ -175,73 +175,8 @@ int Delaunay::findSimplex(const std::vector<double>& point) const {
  * 
  * @see solveLinearSystem(), findSimplex()
  */
-std::vector<double> Delaunay::calculateBarycentricCoordinates(
-    const std::vector<double>& point, int simplex_id) const {
-    
-    if (!qhull_ || qhull_->qhullStatus() != 0) {
-        return {};
-    }
-    
-    const size_t n_dims = point.size();
-    std::vector<double> barycentric(n_dims + 1, 0.0);
-    
-    // Get the specific simplex vertices
-    auto simplices = getSimplices();
-    if (simplex_id < 0 || simplex_id >= static_cast<int>(simplices.size())) {
-        return {};
-    }
-    
-    const auto& simplex = simplices[simplex_id];
-    if (simplex.size() != n_dims + 1) {
-        return {};
-    }
-    
-    // Build the transformation matrix A and vector b
-    // A * lambda = point - vertex[0], where lambda are the last n_dims barycentric coordinates
-    std::vector<std::vector<double>> A(n_dims, std::vector<double>(n_dims));
-    std::vector<double> b(n_dims);
-    
-    // Use first vertex as origin
-    int first_vertex_idx = simplex[0];
-    if (first_vertex_idx < 0 || first_vertex_idx >= static_cast<int>(points_.size())) {
-        return {};
-    }
-    
-    const auto& first_vertex = points_[first_vertex_idx];
-    
-    // Build matrix A: columns are (vertex[i] - vertex[0]) for i = 1, 2, ..., n_dims
-    for (size_t i = 0; i < n_dims; ++i) {
-        int vertex_idx = simplex[i + 1];
-        if (vertex_idx < 0 || vertex_idx >= static_cast<int>(points_.size())) {
-            return {};
-        }
-        
-        const auto& vertex = points_[vertex_idx];
-        for (size_t j = 0; j < n_dims; ++j) {
-            A[j][i] = vertex[j] - first_vertex[j];
-        }
-    }
-    
-    // Build vector b: point - vertex[0]
-    for (size_t j = 0; j < n_dims; ++j) {
-        b[j] = point[j] - first_vertex[j];
-    }
-    
-    // Solve linear system A * lambda = b
-    std::vector<double> lambda = solveLinearSystem(A, b);
-    
-    // Convert to barycentric coordinates
-    // barycentric[0] = 1 - sum(lambda)
-    // barycentric[i] = lambda[i-1] for i = 1, ..., n_dims
-    double sum = 0.0;
-    for (size_t i = 0; i < n_dims; ++i) {
-        barycentric[i + 1] = lambda[i];
-        sum += lambda[i];
-    }
-    barycentric[0] = 1.0 - sum;
-    
-    return barycentric;
-}
+// 古いcalculateBarycentricCoordinatesメソッドは削除
+// SciPy準拠のcalculateBarycentricCoordinatesWithTransformに統一
 
 /**
  * @brief 三角分割の全単体を取得
@@ -342,65 +277,8 @@ std::vector<std::vector<int>> Delaunay::getSimplices() const {
  * 
  * @see calculateBarycentricCoordinates()
  */
-std::vector<double> Delaunay::solveLinearSystem(
-    const std::vector<std::vector<double>>& A, 
-    const std::vector<double>& b) const {
-    
-    const size_t n = A.size();
-    std::vector<double> x(n, 0.0);
-    
-    if (n == 0 || A[0].size() != n || b.size() != n) {
-        return x;
-    }
-    
-    // コピーを作成（ガウス消去法で変更するため）
-    std::vector<std::vector<double>> mat(n, std::vector<double>(n + 1));
-    for (size_t i = 0; i < n; ++i) {
-        for (size_t j = 0; j < n; ++j) {
-            mat[i][j] = A[i][j];
-        }
-        mat[i][n] = b[i];
-    }
-    
-    // 前進消去
-    for (size_t i = 0; i < n; ++i) {
-        // ピボット選択
-        size_t pivot_row = i;
-        for (size_t k = i + 1; k < n; ++k) {
-            if (std::abs(mat[k][i]) > std::abs(mat[pivot_row][i])) {
-                pivot_row = k;
-            }
-        }
-        
-        if (pivot_row != i) {
-            std::swap(mat[i], mat[pivot_row]);
-        }
-        
-        // 特異行列のチェック
-        if (std::abs(mat[i][i]) < 1e-12) {
-            return x; // 解けない場合は零ベクトルを返す
-        }
-        
-        // 消去
-        for (size_t k = i + 1; k < n; ++k) {
-            double factor = mat[k][i] / mat[i][i];
-            for (size_t j = i; j <= n; ++j) {
-                mat[k][j] -= factor * mat[i][j];
-            }
-        }
-    }
-    
-    // 後退代入
-    for (int i = n - 1; i >= 0; --i) {
-        x[i] = mat[i][n];
-        for (size_t j = i + 1; j < n; ++j) {
-            x[i] -= mat[i][j] * x[j];
-        }
-        x[i] /= mat[i][i];
-    }
-    
-    return x;
-}
+// 古いsolveLinearSystemメソッドは削除済み
+// SciPy準拠のinvertMatrixRobustに統一
 
 const std::vector<std::vector<std::vector<double>>>& Delaunay::getTransform() const {
     if (!transform_computed_) {
@@ -427,11 +305,11 @@ std::vector<double> Delaunay::calculateBarycentricCoordinatesWithTransform(
         return {};
     }
     
-    // 変換行列にNaNが含まれる場合（特異行列）は元の方法にフォールバック（SciPy準拠）
+    // 変換行列にNaNが含まれる場合（特異行列）は空を返す（SciPy準拠）
     for (size_t i = 0; i <= ndim; ++i) {
         for (size_t j = 0; j < ndim; ++j) {
             if (!std::isfinite(T[i][j])) {
-                return calculateBarycentricCoordinates(point, simplex_id);
+                return {};  // 特異行列の場合は計算不可
             }
         }
     }
