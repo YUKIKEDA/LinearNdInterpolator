@@ -137,7 +137,7 @@ void LinearNdInterpolator::initialize(
     values_ = values;
 
     // ドロネー三角形分割を作成
-    setupTriangulation(points);
+    calculateTriangulation(points);
 }
 
 /**
@@ -148,7 +148,7 @@ void LinearNdInterpolator::initialize(
  * 
  * @param points 補間点座標の配列。各要素は点の座標を表すベクトル
  */
-void LinearNdInterpolator::setupTriangulation(
+void LinearNdInterpolator::calculateTriangulation(
     const std::vector<std::vector<double>> &points)
 {
     delaunay_ = std::make_unique<Delaunay>(points);

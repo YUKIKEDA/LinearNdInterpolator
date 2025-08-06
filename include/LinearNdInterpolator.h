@@ -164,5 +164,5 @@ private:
      * @throws std::runtime_error Qhullライブラリでエラーが発生した場合
      * @throws std::invalid_argument 点群データが三角分割に不適切な場合
      */
-    void setupTriangulation(const std::vector<std::vector<double>>& points);
+    void calculateTriangulation(const std::vector<std::vector<double>>& points);
 };
