@@ -139,12 +139,16 @@ public:
     
     /**
      * @brief SciPy準拠のDirected Search実装
+     * 
+     * 事前計算済みのsimplices配列を受け取ることで、getSimplices()の重複呼び出しを回避します。
+     * SciPyと同等のパフォーマンス特性を実現します。
      */
     int findSimplexDirected(const std::vector<double>& point,
                            int start_simplex,
                            double eps,
                            double eps_broad,
-                           std::vector<double>& barycentric_coords) const;
+                           std::vector<double>& barycentric_coords,
+                           const std::vector<std::vector<int>>& simplices) const;
     
     /**
      * @brief Paraboloid上での平面距離計算（SciPy _distplane完全準拠）
@@ -226,6 +230,18 @@ private:
      */
     double paraboloid_shift_;
     
+    /**
+     * @brief SciPy準拠の事前計算済み面方程式配列
+     * 形状: [simplex_id * (ndim + 2) + coefficient_index]
+     * coefficients 0..ndim: normal vector, ndim+1: offset
+     */
+    mutable std::vector<double> equations_;
+    
+    /**
+     * @brief 面方程式が計算済みかどうかのフラグ
+     */
+    mutable bool equations_computed_;
+    
     
     /**
      * @brief バリセントリック変換行列を計算
@@ -242,6 +258,14 @@ private:
      * SciPyのneighborsプロパティの計算に相当する機能です。
      */
     void computeNeighbors() const;
+    
+    /**
+     * @brief 面方程式を事前計算（SciPy準拠）
+     * 
+     * 全simplexに対する面方程式を事前計算し、O(1)アクセスを可能にします。
+     * SciPyのequationsプロパティに相当する機能です。
+     */
+    void computeEquations() const;
     
     /**
      * @brief 単一simplexの変換行列を計算

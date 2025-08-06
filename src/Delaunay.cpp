@@ -36,7 +36,7 @@
  *       SciPyと同等のオプション（"d Qbb Qc Qz Q12 Qt"）で三角分割を実行します。
  *       5次元以上の場合は追加で"Qx"オプションが使用されます。
  */
-Delaunay::Delaunay(const std::vector<std::vector<double>>& points) : transform_computed_(false), neighbors_computed_(false) {
+Delaunay::Delaunay(const std::vector<std::vector<double>>& points) : transform_computed_(false), neighbors_computed_(false), equations_computed_(false) {
     // 入力点が空の場合はエラー
     if (points.empty()) {
         throw std::invalid_argument("Input points cannot be empty.");
@@ -221,7 +221,8 @@ int Delaunay::findSimplex(std::vector<double>& barycentric_coords,
     
     // Step 3: 現在のsimplex近働にいるので、Directed Searchで正確な位置を探索
     start_simplex = isimplex;
-    return findSimplexDirected(point, isimplex, eps, eps_broad, barycentric_coords);
+    // SciPy準拠：事前計算済みsimplices配列を最適化版に渡す
+    return findSimplexDirected(point, isimplex, eps, eps_broad, barycentric_coords, simplices);
 }
 
 /**
@@ -616,19 +617,78 @@ void Delaunay::computeNeighbors() const {
     neighbors_computed_ = true;
 }
 
+/**
+ * @brief 面方程式を事前計算（SciPy準拠）
+ * 
+ * 全simplexに対する面方程式を事前計算し、O(1)アクセスを可能にします。
+ * SciPyのequationsプロパティに相当する機能です。
+ * 
+ * 面方程式は [normal0, normal1, ..., normalN, offset] 形式で格納され、
+ * simplex_id * (ndim + 2) + coefficient_index でアクセス可能です。
+ */
+void Delaunay::computeEquations() const {
+    if (equations_computed_ || !qhull_ || qhull_->qhullStatus() != 0) {
+        return;
+    }
+    
+    const size_t ndim = points_.empty() ? 0 : points_[0].size();
+    auto facetList = qhull_->facetList();
+    
+    // 有効なfacetのみカウント（下半分のfacetのみ）
+    size_t valid_facet_count = 0;
+    for (auto facet : facetList) {
+        if (!facet.isUpperDelaunay()) {
+            valid_facet_count++;
+        }
+    }
+    
+    // SciPy準拠: equations配列のサイズ確保
+    // 形状: [simplex_id * (ndim + 2) + coefficient_index]
+    // coefficients 0..ndim: normal vector, ndim+1: offset
+    equations_.resize(valid_facet_count * (ndim + 2));
+    
+    // SciPy準拠の面方程式計算
+    size_t equation_index = 0;
+    for (auto facet : facetList) {
+        if (facet.isUpperDelaunay()) {
+            continue;  // 上半分は除外（SciPy準拠）
+        }
+        
+        auto hyperplane = facet.hyperplane();
+        auto coordinates = hyperplane.coordinates();
+        
+        // SciPy準拠: [normal0, normal1, ..., normalN, offset] 形式で格納
+        const size_t base_idx = equation_index * (ndim + 2);
+        
+        // Normal vector components (lifted space coordinates)
+        for (size_t k = 0; k <= ndim; ++k) {
+            equations_[base_idx + k] = coordinates[k];
+        }
+        
+        // Offset (ndim+1 position)
+        equations_[base_idx + ndim + 1] = hyperplane.offset();
+        
+        equation_index++;
+    }
+    
+    equations_computed_ = true;
+}
 
 
 /**
- * @brief SciPy準拠のDirected Search実装
+ * @brief SciPy準拠のDirected Search実装（最適化版）
+ * 
+ * 事前計算済みのsimplices配列を受け取ることで、getSimplices()の重複呼び出しを回避します。
+ * SciPyと同等のパフォーマンス特性を実現します。
  */
 int Delaunay::findSimplexDirected(const std::vector<double>& point,
                                   int start_simplex,
                                   double eps,
                                   double eps_broad,
-                                  std::vector<double>& barycentric_coords) const {
-    // SciPy _find_simplex_directed完全準拠実装
+                                  std::vector<double>& barycentric_coords,
+                                  const std::vector<std::vector<int>>& simplices) const {
+    // SciPy _find_simplex_directed完全準拠実装（最適化版）
     const size_t ndim = points_[0].size();
-    auto simplices = getSimplices();
     
     int isimplex = start_simplex;
     if (isimplex < 0 || isimplex >= static_cast<int>(simplices.size())) {
@@ -638,30 +698,52 @@ int Delaunay::findSimplexDirected(const std::vector<double>& point,
     // SciPy準拠の最大イテレーション数
     const int max_iterations = 1 + static_cast<int>(simplices.size()) / 4;
     
+    // SciPy準拠：変換行列を一度だけ取得（外側で計算）
+    const auto& transform = getTransform();
+    
+    // SciPy _find_simplex_directed: cycle_k loop
     for (int cycle_k = 0; cycle_k < max_iterations; ++cycle_k) {
         if (isimplex == -1) {
-            break;
+            break;  // 退化simplex
         }
         
-        // 現在のsimplexに対して重心座標を計算
+        // SciPy準拠：変換行列への直接アクセス（inline barycentric calculation）
+        if (isimplex >= static_cast<int>(transform.size())) {
+            return -1;
+        }
+        const auto& T = transform[isimplex];
+        
         bool inside = true;
         
+        // SciPy準拠：各重心座標を計算してsimplexの内側かチェック
         for (size_t k = 0; k <= ndim; ++k) {
-            // SciPy _barycentric_coordinate_single相当の処理
-            calculateBarycentricCoordinateSingle(isimplex, point, barycentric_coords, static_cast<int>(k));
+            // SciPy _barycentric_coordinate_single相当をインライン化
+            if (k == ndim) {
+                // 最後の座標: c[ndim] = 1.0 - Σ(c[j]) for j=0..ndim-1
+                barycentric_coords[ndim] = 1.0;
+                for (size_t j = 0; j < ndim; ++j) {
+                    barycentric_coords[ndim] -= barycentric_coords[j];
+                }
+            } else {
+                // c[k] = Σ(transform[k][j] * (x[j] - transform[ndim][j]))
+                barycentric_coords[k] = 0.0;
+                for (size_t j = 0; j < ndim; ++j) {
+                    barycentric_coords[k] += T[k][j] * (point[j] - T[ndim][j]);
+                }
+            }
             
             if (barycentric_coords[k] < -eps) {
-                // ターゲット点は隣接simplex kの方向にある
+                // SciPy準拠: 負の重心座標 -> 隣接simplexに移動
                 if (isimplex < static_cast<int>(neighbors_.size()) && 
                     k < neighbors_[isimplex].size()) {
                     int m = neighbors_[isimplex][k];
                     if (m == -1) {
-                        // 点は三角分割の外側
+                        // 境界に到達 -> 外部なのでexit
                         return -1;
                     }
                     isimplex = m;
                     inside = false;
-                    break;
+                    break;  // 新しいsimplexに移動したので次のイテレーション
                 }
             } else if (barycentric_coords[k] <= 1.0 + eps) {
                 // このsimplex内にいる
@@ -691,35 +773,34 @@ int Delaunay::findSimplexDirected(const std::vector<double>& point,
  * @brief Paraboloid上での平面距離計算（SciPy _distplane完全準拠）
  */
 double Delaunay::calculatePlaneDistance(int simplex_id, const double* lifted_point, size_t dim) const {
-    // SciPy _distplane完全準拠実装
+    // SciPy _distplane完全準拠実装（O(1)アクセス）
     // dist = equations[isimplex*(ndim+2) + ndim+1] + Σ(equations[isimplex*(ndim+2) + k] * point[k])
     
-    if (simplex_id < 0 || simplex_id >= static_cast<int>(getSimplices().size())) {
+    // 事前計算済み面方程式配列を確保
+    if (!equations_computed_) {
+        computeEquations();
+    }
+    
+    if (simplex_id < 0) {
         return -std::numeric_limits<double>::max();
     }
     
     const size_t ndim = points_[0].size();
+    const size_t max_simplices = equations_.size() / (ndim + 2);
     
-    // Qhullから直接面方程式情報を取得
-    auto facets = qhull_->facetList();
-    if (facets.size() <= static_cast<size_t>(simplex_id)) {
+    if (simplex_id >= static_cast<int>(max_simplices)) {
         return -std::numeric_limits<double>::max();
     }
     
-    auto facet_it = facets.begin();
-    std::advance(facet_it, simplex_id);
-    auto facet = *facet_it;
-    
-    // 面方程式の係数を取得（SciPy準拠）
-    auto hyperplane = facet.hyperplane();
-    auto coordinates = hyperplane.coordinates();
+    // SciPy準拠: O(1)の事前計算済み配列アクセス
+    const size_t base_idx = static_cast<size_t>(simplex_id) * (ndim + 2);
     
     // SciPy _distplane: dist = offset + Σ(normal[k] * point[k])
-    double dist = hyperplane.offset();
+    double dist = equations_[base_idx + ndim + 1];  // offset
     
-    // ndim+1個の座標を使用（paraboloid投影のため）
+    // 法線ベクトルとの内積計算（paraboloid空間でndim+1個の座標）
     for (size_t k = 0; k <= ndim; ++k) {
-        dist += coordinates[k] * lifted_point[k];
+        dist += equations_[base_idx + k] * lifted_point[k];
     }
     
     return dist;
