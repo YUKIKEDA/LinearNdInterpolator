@@ -102,16 +102,17 @@ public:
     std::vector<std::vector<double>> interpolate(const std::vector<std::vector<double>>& query) const;
     
     /**
-     * @brief 単一点でのスカラー補間値を計算
+     * @brief 単一点での補間値を計算
      * 
-     * 指定された単一のクエリ点に対してスカラー線形補間を実行します。
+     * 指定された単一のクエリ点に対して線形補間を実行します。
+     * SciPy準拠：スカラー値補間の場合は1要素のベクトル、ベクトル値補間の場合はM次元ベクトルを返します。
      * 
      * @param query_point 補間を実行する単一のN次元クエリ点
-     * @return 補間されたスカラー値。凸包外の場合はNaN
+     * @return 補間値のベクトル。スカラー値補間では[value]、ベクトル値補間では[v0,v1,...,vM-1]
+     *         凸包外の場合は適切なサイズのNaNベクトルを返す
      * @throws std::invalid_argument query_pointの次元が構築時の点群と一致しない場合
-     * @throws std::runtime_error ベクトル値補間器に対してこのメソッドが呼ばれた場合
      */
-    double interpolate(const std::vector<double>& query_point) const;
+    std::vector<double> interpolate(const std::vector<double>& query_point) const;
 
 private:
     /**

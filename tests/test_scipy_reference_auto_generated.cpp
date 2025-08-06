@@ -35,7 +35,8 @@ protected:
         double expected_result
     ) {
         LinearNdInterpolator interp(points, values);
-        double result = interp.interpolate(query_point);
+        auto result_vector = interp.interpolate(query_point);
+        double result = result_vector[0];  // SciPy準拠：スカラー値は最初の要素
         EXPECT_NEAR(result, expected_result, exact_tolerance_)
             << "Exact match failed for point [" << formatPoint(query_point) << "]"
             << "\nExpected: " << expected_result << ", Got: " << result;
@@ -49,7 +50,8 @@ protected:
         const std::string& test_type = "standard"
     ) {
         LinearNdInterpolator interp(points, values);
-        double result = interp.interpolate(query_point);
+        auto result_vector = interp.interpolate(query_point);
+        double result = result_vector[0];  // SciPy準拠：スカラー値は最初の要素
         
         double tolerance = interpolation_tolerance_;
         if (test_type == "loose" || test_type == "random" || test_type == "large") {
@@ -73,7 +75,8 @@ protected:
         const std::vector<double>& query_point
     ) {
         LinearNdInterpolator interp(points, values);
-        double result = interp.interpolate(query_point);
+        auto result_vector = interp.interpolate(query_point);
+        double result = result_vector[0];  // SciPy準拠：スカラー値は最初の要素
         // Our implementation returns NaN for out-of-hull points (like SciPy)
         EXPECT_TRUE(std::isnan(result))
             << "Out-of-hull point should return NaN, got: " << result

@@ -240,27 +240,29 @@ std::vector<std::vector<double>> LinearNdInterpolator::interpolate(
 }
 
 /**
- * @brief 単一点に対する線形補間（スカラー値用）
+ * @brief 単一点での補間値を計算（SciPy準拠）
  * 
- * 与えられた単一のクエリ点に対して線形補間を実行し、スカラー補間値を返します。
- * 内部で複数点版のinterpolateメソッドを呼び出し、結果の最初の値を返します。
+ * 与えられた単一のクエリ点に対して線形補間を実行します。
+ * SciPy準拠：スカラー値補間の場合は1要素のベクトル、ベクトル値補間の場合はM次元ベクトルを返します。
  * 
  * @param query_point 補間対象の点座標
  * 
- * @return 補間されたスカラー値。計算に失敗した場合やクエリ点が凸包外の場合はNaNを返します
+ * @return 補間値のベクトル。スカラー値補間では[value]、ベクトル値補間では[v0,v1,...,vM-1]
+ *         凸包外の場合は適切なサイズのNaNベクトルを返します
  */
-double LinearNdInterpolator::interpolate(const std::vector<double>& query_point) const {
-    // 単一点を複数点形式に変換
+std::vector<double> LinearNdInterpolator::interpolate(const std::vector<double>& query_point) const {
+    // SciPy準拠：単一点を複数点形式に変換
     std::vector<std::vector<double>> query = {query_point};
     
     // 既存の複数点interpolateメソッドを呼び出し
     auto results = interpolate(query);
     
-    // 結果から最初の値を取得（1次元値の場合）
-    if (!results.empty() && !results[0].empty()) {
-        return results[0][0];
+    // SciPy準拠：最初の結果を返す（ベクトル値でもスカラー値でも対応）
+    if (!results.empty()) {
+        return results[0];  // 完全なベクトル値を返す
     }
     
-    // エラーの場合はNaNを返す
-    return std::numeric_limits<double>::quiet_NaN();
+    // エラーの場合：values_と同じサイズのNaNベクトルを返す
+    const size_t output_dim = values_.empty() ? 1 : values_[0].size();
+    return std::vector<double>(output_dim, std::numeric_limits<double>::quiet_NaN());
 }
