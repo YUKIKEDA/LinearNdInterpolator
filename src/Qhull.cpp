@@ -14,7 +14,7 @@ Qhull::Qhull(
     const std::string& command, 
     const std::vector<std::vector<double>>& points, 
     const std::string& options
-) : points_(points), command_(command), options_(options), computed_(false) 
+) : points_(points), command_(command), options_(options), initialized_(false), computed_(false) 
 {
     // 入力データの検証
     // 点の配列が空でないことを確認
@@ -40,8 +40,44 @@ Qhull::Qhull(
     // Check if this is Delaunay mode
     is_delaunay_ = (command == "d" || command == "v");
     
-    // Qhullコンテキストの初期化
+    // SciPy準拠: コンストラクタでqh_new_qhullを実行（_Qhull.__init__相当）
     qh_zero(&qh_qh, nullptr);
+    
+    // 点群データをQhull形式に変換
+    int numpoints = static_cast<int>(points_.size());
+    int dim = static_cast<int>(ndim_);
+    
+    // フラットな配列に変換
+    std::vector<coordT> qpoints(numpoints * dim);
+    for (int i = 0; i < numpoints; ++i) {
+        for (int j = 0; j < dim; ++j) {
+            qpoints[i * dim + j] = static_cast<coordT>(points_[i][j]);
+        }
+    }
+    
+    // Qhullオプションの準備
+    std::string qhull_command;
+    if (is_delaunay_) {
+        qhull_command = "qhull d " + options_;
+    } else {
+        qhull_command = "qhull " + options_;
+    }
+    
+    // SciPy準拠: required_options ("Qt") を追加
+    qhull_command += " Qt";
+    
+    // SciPy準拠: qh_new_qhullの実行（_Qhull.__init__相当）
+    int exitcode = qh_new_qhull(
+        &qh_qh, dim, numpoints, qpoints.data(), 
+        False, const_cast<char*>(qhull_command.c_str()), 
+        nullptr, stderr
+    );
+    
+    if (exitcode) {
+        throw std::runtime_error("Qhull failed with exit code: " + std::to_string(exitcode));
+    }
+    
+    initialized_ = true;
 }
 
 Qhull::~Qhull() {
@@ -74,38 +110,7 @@ void Qhull::triangulate() {
     if (computed_) return;
     
     try {
-        // 点群データをQhull形式に変換
-        int numpoints = static_cast<int>(points_.size());
-        int dim = static_cast<int>(ndim_);
-        
-        // フラットな配列に変換
-        std::vector<coordT> qpoints(numpoints * dim);
-        for (int i = 0; i < numpoints; ++i) {
-            for (int j = 0; j < dim; ++j) {
-                qpoints[i * dim + j] = static_cast<coordT>(points_[i][j]);
-            }
-        }
-        
-        // Qhullオプションの準備
-        std::string qhull_command;
-        if (is_delaunay_) {
-            qhull_command = "qhull d " + options_ + " Qt";  // delaunay + triangulated output
-        } else {
-            qhull_command = "qhull " + options_;
-        }
-        
-        // Qhullの実行
-        int exitcode = qh_new_qhull(
-            &qh_qh, dim, numpoints, qpoints.data(), 
-            False, const_cast<char*>(qhull_command.c_str()), 
-            nullptr, stderr
-        );
-        
-        if (exitcode) {
-            throw std::runtime_error("Qhull failed with exit code: " + std::to_string(exitcode));
-        }
-        
-        // 三角分割の実行
+        // SciPy準拠: qh_triangulateのみを実行（qh_new_qhullはコンストラクタで実行済み）
         qh_triangulate(&qh_qh);
         
         computed_ = true;
@@ -116,8 +121,8 @@ void Qhull::triangulate() {
 }
 
 std::pair<double, double> Qhull::getParaboloidShiftScale() const {
-    if (!computed_) {
-        throw std::runtime_error("Triangulation must be computed before accessing paraboloid parameters");
+    if (!initialized_) {
+        throw std::runtime_error("Qhull must be initialized before accessing paraboloid parameters");
     }
     
     double paraboloid_scale;

@@ -72,7 +72,12 @@ private:
     std::string options_;
 
     /**
-     * 計算が実行済みかどうか
+     * Qhullが初期化済みかどうか（SciPy準拠: _Qhull.__init__相当）
+     */
+    bool initialized_;
+
+    /**
+     * 計算が実行済みかどうか（SciPy準拠: qh_triangulate実行済み）
      */
     bool computed_;
 
@@ -117,10 +122,9 @@ public:
      * @brief 三角分割を実行
      * 
      * SciPyの_Qhull.triangulate()に対応するメソッドです。
-     * Qhullを実行して三角分割または指定された計算を行います。
+     * qh_triangulateを実行して三角分割を行います。
      * 
      * @throws std::runtime_error 計算に失敗した場合
-     * @throws std::logic_error 既に計算が実行済みの場合
      */
     void triangulate();
 
