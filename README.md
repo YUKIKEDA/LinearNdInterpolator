@@ -4,115 +4,115 @@
 [![SciPy Compatible](https://img.shields.io/badge/SciPy-compatible-blue)](https://scipy.org/)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)](https://en.cppreference.com/w/cpp/17)
 
-A high-performance C++ library for N-dimensional linear interpolation using Delaunay triangulation. This implementation achieves **complete numerical compatibility** with SciPy's `LinearNDInterpolator`, making it suitable for scientific computing applications requiring precise interpolation results.
+SciPyの`LinearNDInterpolator`と**完全な数値互換性**を実現する高性能C++ライブラリです。ドロネー三角分割を使用したN次元線形補間を提供し、科学計算アプリケーションに適した精密な補間結果を実現します。
 
-## ✨ Features
+## ✨ 特徴
 
-- **🎯 SciPy Compatibility**: 100% numerical accuracy match with SciPy's LinearNDInterpolator
-- **📐 N-Dimensional Support**: Handles 2D to 4D+ interpolation seamlessly
-- **⚡ Delaunay Triangulation**: Uses Qhull library for robust triangulation
-- **🔢 Barycentric Interpolation**: Linear interpolation using barycentric coordinates
-- **🛡️ Robust Error Handling**: Comprehensive input validation and edge case management
-- **🔍 Convex Hull Detection**: Returns NaN for points outside the convex hull (SciPy-compatible)
+- **🎯 SciPy互換性**: SciPyのLinearNDInterpolatorと100%の数値精度一致
+- **📐 N次元サポート**: 2次元から4次元以上の補間をシームレスに処理
+- **⚡ ドロネー三角分割**: Qhullライブラリを使用した堅牢な三角分割
+- **🔢 重心座標補間**: 重心座標を使用した線形補間
+- **🛡️ 堅牢なエラーハンドリング**: 包括的な入力検証とエッジケース管理
+- **🔍 凸包検出**: 凸包外の点にはNaNを返す（SciPy互換）
 
-## 🚀 Quick Start
+## 🚀 クイックスタート
 
-### Basic Usage
+### 基本的な使用方法
 
 ```cpp
 #include "LinearNdInterpolator.h"
 #include <vector>
 
-// Define 2D points and their values
+// 2次元の点とその値を定義
 std::vector<std::vector<double>> points = {
     {0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}, {0.5, 0.5}
 };
 std::vector<double> values = {0.0, 1.0, 1.0, 1.0};
 
-// Create interpolator
+// 補間器を作成
 LinearNdInterpolator interp(points, values);
 
-// Interpolate at a new point
+// 新しい点で補間
 double result = interp.interpolate({0.25, 0.25});
-std::cout << "Interpolated value: " << result << std::endl;
+std::cout << "補間値: " << result << std::endl;
 ```
 
-### Multi-Point Interpolation
+### 複数点の補間
 
 ```cpp
-// Query multiple points at once
+// 複数の点を一度に補間
 std::vector<std::vector<double>> query_points = {
     {0.1, 0.1}, {0.3, 0.4}, {0.7, 0.2}
 };
 
 auto results = interp.interpolate(query_points);
 for (size_t i = 0; i < results.size(); ++i) {
-    std::cout << "Point " << i << ": " << results[i][0] << std::endl;
+    std::cout << "点 " << i << ": " << results[i][0] << std::endl;
 }
 ```
 
-## 🏗️ Building the Project
+## 🏗️ プロジェクトのビルド
 
-### Prerequisites
+### 前提条件
 
-- **Compiler**: C++17 compatible compiler (Visual Studio 2019+, GCC 7+, Clang 5+)
-- **CMake**: Version 3.15 or higher
-- **Dependencies**: Qhull (included), GoogleTest (auto-downloaded)
+- **コンパイラ**: C++17対応コンパイラ（Visual Studio 2019+、GCC 7+、Clang 5+）
+- **CMake**: バージョン3.15以上
+- **依存関係**: Qhull（含まれています）、GoogleTest（自動ダウンロード）
 
-### Build Instructions
+### ビルド手順
 
 ```bash
-# Generate build files
+# ビルドファイルを生成
 cmake -B build -G "Visual Studio 17 2022"
 
-# Build the project
+# プロジェクトをビルド
 cmake --build build
 
-# Run tests
+# テストを実行
 "build\bin\Debug\test_scipy_reference.exe"
 ```
 
-### Integration
+### 統合
 
 ```cmake
-# Add to your CMakeLists.txt
+# CMakeLists.txtに追加
 find_package(LinearNdInterpolator REQUIRED)
 target_link_libraries(your_target LinearNdInterpolator::LinearNdInterpolator)
 ```
 
-## 📊 Performance & Compatibility
+## 📊 パフォーマンスと互換性
 
-### SciPy Compatibility Tests
+### SciPy互換性テスト
 
-✅ **All 7 test suites passing:**
-- 2D Basic Triangle
-- 2D Complex Random Points  
-- 3D Basic Tetrahedron
-- 4D Basic Simplex
-- 2D Collinear Points
-- 2D Duplicate Points
-- 2D Large Dataset (100 points)
+✅ **全7つのテストスイートが通過:**
+- 2次元基本三角形
+- 2次元複雑ランダム点
+- 3次元基本四面体
+- 4次元基本単体
+- 2次元共線点
+- 2次元重複点
+- 2次元大規模データセット（100点）
 
 ```bash
-# Run compatibility tests
+# 互換性テストを実行
 "build\bin\Debug\test_scipy_reference.exe"
 ```
 
-### Current Performance Status
+### 現在のパフォーマンス状況
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| **Numerical Accuracy** | ✅ Perfect | 100% SciPy compatibility |
-| **Basic Functionality** | ✅ Complete | All core features working |
-| **Error Handling** | ✅ Good | Comprehensive validation |
-| **Transform Matrices** | ✅ Implemented | SciPy-style optimization active |
-| **Walking Algorithm** | ✅ Infrastructure | Framework ready for optimization |
-| **Performance** | 🟡 Partially Optimized | Transform matrices implemented |
-| **Memory Usage** | 🟡 Acceptable | Room for optimization |
+| 機能 | 状況 | 備考 |
+|------|------|------|
+| **数値精度** | ✅ 完璧 | 100% SciPy互換性 |
+| **基本機能** | ✅ 完了 | 全コア機能が動作 |
+| **エラーハンドリング** | ✅ 良好 | 包括的な検証 |
+| **変換行列** | ✅ 実装済み | SciPyスタイル最適化が有効 |
+| **歩行アルゴリズム** | ✅ インフラ | 最適化のためのフレームワーク準備完了 |
+| **パフォーマンス** | 🟡 部分的に最適化 | 変換行列が実装済み |
+| **メモリ使用量** | 🟡 許容範囲 | 最適化の余地あり |
 
-## 🛠️ API Reference
+## 🛠️ APIリファレンス
 
-### Constructor
+### コンストラクタ
 
 ```cpp
 LinearNdInterpolator(
@@ -122,153 +122,153 @@ LinearNdInterpolator(
 
 LinearNdInterpolator(
     const std::vector<std::vector<double>>& points, 
-    const std::vector<std::vector<double>>& values  // Multi-dimensional values
+    const std::vector<std::vector<double>>& values  // 多次元値
 );
 ```
 
-### Methods
+### メソッド
 
 ```cpp
-// Single point interpolation
+// 単一点補間
 double interpolate(const std::vector<double>& point) const;
 
-// Multi-point interpolation
+// 複数点補間
 std::vector<std::vector<double>> interpolate(
     const std::vector<std::vector<double>>& points
 ) const;
 ```
 
-### Error Handling
+### エラーハンドリング
 
-The library throws `std::invalid_argument` for:
-- Empty input data
-- Mismatched point and value counts
-- Inconsistent dimensions
-- Points with < 2 dimensions
-- NaN or infinite input values
+ライブラリは以下の場合に`std::invalid_argument`を投げます：
+- 空の入力データ
+- 点と値の数の不一致
+- 次元の不整合
+- 2次元未満の点
+- NaNまたは無限大の入力値
 
-## 📈 Development Status
+## 📈 開発状況
 
-### ✅ Completed (Phase 1-2)
+### ✅ 完了済み（フェーズ1-2）
 
-- **Core Algorithm**: N-dimensional linear interpolation
-- **SciPy Compatibility**: Complete numerical compatibility achieved
-- **Transform Matrices**: SciPy-style barycentric coordinate optimization implemented
-- **Walking Algorithm Infrastructure**: Framework for efficient simplex search
-- **Robust Implementation**: Comprehensive error handling and validation
-- **Testing Suite**: All 17 SciPy reference tests passing
-- **Cross-Platform Build**: CMake-based build system
+- **コアアルゴリズム**: N次元線形補間
+- **SciPy互換性**: 完全な数値互換性を達成
+- **変換行列**: SciPyスタイルの重心座標最適化を実装
+- **歩行アルゴリズムインフラ**: 効率的な単体検索のフレームワーク
+- **堅牢な実装**: 包括的なエラーハンドリングと検証
+- **テストスイート**: 全17のSciPy参照テストが通過
+- **クロスプラットフォームビルド**: CMakeベースのビルドシステム
 
-### 🚧 Current Limitations & Roadmap
+### 🚧 現在の制限とロードマップ
 
-#### High Priority Improvements
+#### 高優先度改善
 
-1. **🟡 Walking Algorithm Activation** (Target: 3-5 days)
-   - **Status**: Infrastructure completed, needs neighbor computation
-   - **Solution**: Implement proper Qhull neighbor relationships
-   - **Expected Impact**: 10-100x performance improvement for large datasets
+1. **🟡 歩行アルゴリズムの有効化**（目標: 3-5日）
+   - **状況**: インフラ完了、隣接関係計算が必要
+   - **解決策**: 適切なQhull隣接関係の実装
+   - **期待される影響**: 大規模データセットで10-100倍のパフォーマンス向上
 
-2. **✅ Transform Matrix Implementation** (COMPLETED)
-   - **Achievement**: SciPy-style pre-computed transformation matrices
-   - **Impact**: O(d³) → O(d²) barycentric coordinate calculation
-   - **Status**: All 17 SciPy compatibility tests passing
+2. **✅ 変換行列実装**（完了）
+   - **達成**: SciPyスタイルの事前計算変換行列
+   - **影響**: 重心座標計算がO(d³) → O(d²)
+   - **状況**: 全17のSciPy互換性テストが通過
 
-#### Medium Priority Improvements
+#### 中優先度改善
 
-3. **🟡 Enhanced Unit Testing** (Target: 1 week)
-   - Add comprehensive edge case tests
-   - Performance benchmarking suite
-   - Memory usage validation
+3. **🟡 強化された単体テスト**（目標: 1週間）
+   - 包括的なエッジケーステストの追加
+   - パフォーマンスベンチマークスイート
+   - メモリ使用量検証
 
-4. **🟡 Thread Safety** (Target: 3 days)  
-   - Add thread-safe operations
-   - Concurrent query processing
+4. **🟡 スレッド安全性**（目標: 3日）
+   - スレッドセーフ操作の追加
+   - 並行クエリ処理
 
-5. **🟡 Memory Optimization** (Target: 1 week)
-   - Optimize vertex mapping algorithm
-   - Reduce memory footprint for large datasets
+5. **🟡 メモリ最適化**（目標: 1週間）
+   - 頂点マッピングアルゴリズムの最適化
+   - 大規模データセットのメモリフットプリント削減
 
-#### Future Enhancements
+#### 将来の拡張
 
-- **Incremental Point Addition**: Dynamic point insertion
-- **Custom Fill Values**: Alternative to NaN for out-of-hull points
-- **Parallel Processing**: OpenMP support for large-scale interpolation
-- **Advanced Interpolation**: Cubic and higher-order methods
+- **増分点追加**: 動的ポイント挿入
+- **カスタムフィル値**: 凸包外の点に対するNaN以外の選択肢
+- **並列処理**: 大規模補間のためのOpenMPサポート
+- **高度な補間**: 3次および高次メソッド
 
-## 🔬 Technical Details
+## 🔬 技術詳細
 
-### Architecture
+### アーキテクチャ
 
 ```
 LinearNdInterpolator
-├── Delaunay (Qhull-based triangulation)
+├── Delaunay (Qhullベース三角分割)
 │   ├── findSimplex()
 │   ├── calculateBarycentricCoordinates()
 │   └── getSimplices()
-└── interpolate() (Linear interpolation)
+└── interpolate() (線形補間)
 ```
 
-### Algorithm Flow
+### アルゴリズムフロー
 
-1. **Triangulation**: Create Delaunay triangulation using Qhull
-2. **Simplex Location**: Find containing simplex for query point
-3. **Barycentric Calculation**: Compute barycentric coordinates
-4. **Linear Interpolation**: Weight vertex values by coordinates
+1. **三角分割**: Qhullを使用してドロネー三角分割を作成
+2. **単体位置**: クエリ点を含む単体を検索
+3. **重心座標計算**: 重心座標を計算
+4. **線形補間**: 座標で頂点値を重み付け
 
-### Memory Layout
+### メモリレイアウト
 
-- **Points**: Stored as `std::vector<std::vector<double>>`
-- **Values**: Multi-dimensional value support
-- **Triangulation**: Managed by Qhull with RAII principles
+- **点**: `std::vector<std::vector<double>>`として格納
+- **値**: 多次元値サポート
+- **三角分割**: RAII原則でQhullによって管理
 
-## 📋 Testing
+## 📋 テスト
 
-### Test Categories
+### テストカテゴリ
 
 ```bash
-# SciPy compatibility tests (primary validation)
+# SciPy互換性テスト（主要検証）
 "build\bin\Debug\test_scipy_reference.exe"
 
-# Specific test cases
+# 特定のテストケース
 "build\bin\Debug\test_scipy_reference.exe" --gtest_filter="SciPyReferenceTest.2D_Basic_Triangle"
 "build\bin\Debug\test_scipy_reference.exe" --gtest_filter="SciPyReferenceTest.3D_Basic_Tetrahedron"
 ```
 
-### Test Coverage
+### テストカバレッジ
 
-- ✅ **2D-4D Interpolation**: Comprehensive dimensional testing
-- ✅ **Edge Cases**: Collinear points, duplicates, large datasets  
-- ✅ **Error Conditions**: Invalid inputs, out-of-hull points
-- ✅ **Numerical Precision**: Exact SciPy compatibility validation
+- ✅ **2D-4D補間**: 包括的な次元テスト
+- ✅ **エッジケース**: 共線点、重複点、大規模データセット
+- ✅ **エラー条件**: 無効な入力、凸包外の点
+- ✅ **数値精度**: 正確なSciPy互換性検証
 
-## 🤝 Contributing
+## 🤝 貢献
 
-### Development Priorities
+### 開発優先事項
 
-1. **Performance Optimization**: Transform matrix and walking algorithm implementation
-2. **Testing Enhancement**: Independent unit test suite development
-3. **Documentation**: Usage examples and best practices
-4. **Benchmarking**: Performance comparison tools
+1. **パフォーマンス最適化**: 変換行列と歩行アルゴリズムの実装
+2. **テスト強化**: 独立した単体テストスイートの開発
+3. **ドキュメント**: 使用例とベストプラクティス
+4. **ベンチマーク**: パフォーマンス比較ツール
 
-### Getting Started
+### 始め方
 
 ```bash
-# Clone and build
+# クローンしてビルド
 git clone https://github.com/your-repo/LinearNdInterpolator
 cd LinearNdInterpolator
 cmake -B build
 cmake --build build
 
-# Run tests to verify
+# テストを実行して検証
 "build\bin\Debug\test_scipy_reference.exe"
 ```
 
-## 📚 Examples
+## 📚 例
 
-### 3D Surface Interpolation
+### 3次元表面補間
 
 ```cpp
-// Define a 3D surface: f(x,y,z) = x + y + z
+// 3次元表面を定義: f(x,y,z) = x + y + z
 std::vector<std::vector<double>> points = {
     {0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 1, 1}
 };
@@ -276,43 +276,43 @@ std::vector<double> values = {0, 1, 1, 1, 3};
 
 LinearNdInterpolator interp(points, values);
 
-// Interpolate at interior point
+// 内部点で補間
 double result = interp.interpolate({0.25, 0.25, 0.25});
-// Expected: 0.75 (linear combination)
+// 期待値: 0.75 (線形結合)
 ```
 
-### Large Dataset Processing
+### 大規模データセット処理
 
 ```cpp
-// Process large point cloud
+// 大規模点群を処理
 std::vector<std::vector<double>> large_points = loadPointCloud("data.csv");
 std::vector<double> large_values = loadValues("values.csv");
 
 LinearNdInterpolator interp(large_points, large_values);
 
-// Batch interpolation
+// バッチ補間
 std::vector<std::vector<double>> query_grid = generateGrid(100, 100);
 auto results = interp.interpolate(query_grid);
 ```
 
-## 📄 License
+## 📄 ライセンス
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+このプロジェクトはMITライセンスの下でライセンスされています - 詳細は[LICENSE](LICENSE)ファイルを参照してください。
 
-## 🙏 Acknowledgments
+## 🙏 謝辞
 
-- **SciPy Team**: Reference implementation and test cases
-- **Qhull**: Robust computational geometry library
-- **GoogleTest**: Testing framework
+- **SciPyチーム**: 参照実装とテストケース
+- **Qhull**: 堅牢な計算幾何学ライブラリ
+- **GoogleTest**: テストフレームワーク
 
-## 📞 Support
+## 📞 サポート
 
 - **Issues**: [GitHub Issues](https://github.com/your-repo/LinearNdInterpolator/issues)
-- **Documentation**: See `.memo/` directory for detailed technical documentation
-- **Performance**: See `10_interpolate_method_scipy_comparison.md` for optimization roadmap
+- **ドキュメント**: 詳細な技術ドキュメントは`.memo/`ディレクトリを参照
+- **パフォーマンス**: 最適化ロードマップは`10_interpolate_method_scipy_comparison.md`を参照
 
 ---
 
-**Status**: ✅ **Production Ready with SciPy-Compatible Performance Optimization**  
-**Latest Achievement**: 🎯 **Transform Matrix Implementation - O(d³) → O(d²) barycentric calculation**  
-**Next Focus**: 🚀 **Walking Algorithm Activation for Large-Scale Performance**
+**状況**: ✅ **SciPy互換パフォーマンス最適化で本番準備完了**  
+**最新の成果**: 🎯 **変換行列実装 - 重心座標計算がO(d³) → O(d²)**  
+**次の焦点**: 🚀 **大規模パフォーマンスのための歩行アルゴリズム有効化**
