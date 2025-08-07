@@ -14,20 +14,21 @@ Qhull::Qhull(
     const std::string& command, 
     const std::vector<std::vector<double>>& points, 
     const std::string& options
-) 
-    : points_(points), command_(command), options_(options), computed_(false) 
+) : points_(points), command_(command), options_(options), computed_(false) 
 {
-    
+    // 入力データの検証
+    // 点の配列が空でないことを確認
     if (points_.empty()) {
         throw std::invalid_argument("Points array cannot be empty");
     }
-    
+
+    // 次元数を取得し、最低2次元であることを確認
     ndim_ = points_[0].size();
     if (ndim_ < 2) {
         throw std::invalid_argument("Need at least 2-D data");
     }
-    
-    // Check for NaN values
+
+    // 全ての点がNaNでないことを確認
     for (const auto& point : points_) {
         for (double coord : point) {
             if (std::isnan(coord)) {

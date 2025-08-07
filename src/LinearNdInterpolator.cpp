@@ -79,21 +79,27 @@ void LinearNdInterpolator::checkInitShape(
     const std::vector<std::vector<double>>& p, 
     const std::vector<std::vector<double>>& v) 
 {
+    // 入力データの検証
+    
+    // 点の配列が空でないことを確認
     if (p.empty()) {
         throw std::invalid_argument("points array cannot be empty");
     }
     
+    // 次元数を取得し、最低2次元であることを確認
     const size_t ndim = p[0].size();
     if (ndim < 2) {
         throw std::invalid_argument("input data must be at least 2-D");
     }
     
+    // 全ての点が同じ次元数を持つことを確認
     for(const auto& point_vec : p) {
         if(point_vec.size() != ndim) {
             throw std::invalid_argument("points must have consistent dimensions");
         }
     }
 
+    // 点の数と値の数が一致することを確認
     if (v.size() != p.size()) {
         throw std::invalid_argument("different number of values and points");
     }
@@ -105,6 +111,7 @@ void LinearNdInterpolator::checkInterpolateShape(const std::vector<std::vector<d
         return; // 空の入力は許容
     }
 
+    // 入力の次元数が点の次元数と一致することを確認
     // Scipyの self.points.shape[1] は this->get_points()[0].size() に相当
     const size_t ndim = points_[0].size();
     if (xi[0].size() != ndim) {

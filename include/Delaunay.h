@@ -453,8 +453,6 @@ private:
      * 特異値分解(SVD)を使用して擬似逆行列を計算します
      */
     std::vector<std::vector<double>> pseudoInverseMatrix(const std::vector<std::vector<double>>& matrix) const;
-
-    // --- Private Member Variables ---
     
     // ==========================================
     // `_QhullUser` 由来の属性
