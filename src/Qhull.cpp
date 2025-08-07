@@ -94,9 +94,11 @@ void Qhull::triangulate() {
         }
         
         // Qhullの実行
-        int exitcode = qh_new_qhull(&qh_qh, dim, numpoints, qpoints.data(), 
-                                   False, const_cast<char*>(qhull_command.c_str()), 
-                                   nullptr, stderr);
+        int exitcode = qh_new_qhull(
+            &qh_qh, dim, numpoints, qpoints.data(), 
+            False, const_cast<char*>(qhull_command.c_str()), 
+            nullptr, stderr
+        );
         
         if (exitcode) {
             throw std::runtime_error("Qhull failed with exit code: " + std::to_string(exitcode));
