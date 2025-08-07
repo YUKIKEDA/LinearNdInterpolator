@@ -68,16 +68,7 @@ if(BUILD_TESTS)
 
     # テストファイルの追加
     enable_testing()
-    
-    add_executable(test_hello_world
-        tests/test_hello_world.cpp
-    )
-    
-    target_link_libraries(test_hello_world
-        LinearNdInterpolator
-        gtest_main
-    )
-    
+
     # SciPy reference tests (auto-generated from JSON data)
     add_executable(test_scipy_reference
         tests/test_scipy_reference_auto_generated.cpp
@@ -89,7 +80,6 @@ if(BUILD_TESTS)
     )
     
     include(GoogleTest)
-    gtest_discover_tests(test_hello_world)
     gtest_discover_tests(test_scipy_reference)
 endif()
 
