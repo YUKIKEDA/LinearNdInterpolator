@@ -20,8 +20,6 @@ Delaunay::Delaunay(const std::vector<std::vector<double>>& input_points)
     npoints_ = points_.size();
     ndim_ = npoints_ > 0 ? points_[0].size() : 0;
 
-    std::cout << "DEBUG: Delaunay initialized - " << npoints_ << " points, " << ndim_ << " dimensions" << std::endl;
-
     std::string qhull_options = "Qbb Qc Qz Q12";
     if (ndim_ >= 5) {
         qhull_options += " Qx";
@@ -30,20 +28,16 @@ Delaunay::Delaunay(const std::vector<std::vector<double>>& input_points)
     // Scipy: `required_options=b"Qt"` を追加
     std::string full_qhull_options = qhull_options + " Qt";
 
-    std::cout << "DEBUG: About to create Qhull runner..." << std::endl;
     // Scipy: `qhull = _Qhull(b"d", points, ...)`
     // `b"d"`はドロネー三角形分割(delaunay)を意味するコマンド。
     Qhull qhull_runner("d", points_, full_qhull_options);
 
-    std::cout << "DEBUG: Qhull runner created, about to call update..." << std::endl;
     // --------------------------------------------------
     // _QhullUserクラスの __init__ 相当の処理
     // --------------------------------------------------
 
     // Qhullの実行結果をメンバ変数に格納する。
-    update(qhull_runner);
-    
-    std::cout << "DEBUG: Delaunay constructor completed" << std::endl;
+    update(qhull_runner);    
 }
 
 const std::vector<std::vector<int>>& Delaunay::getSimplices() const {
@@ -57,23 +51,17 @@ int Delaunay::findSimplex(
     double eps,
     double eps_broad
 ) const noexcept 
-{
-    std::cout << "DEBUG: findSimplex called for point (" << point[0] << ", " << point[1] << ")" << std::endl;
-    std::cout << "DEBUG: nsimplex_=" << nsimplex_ << ", barycentric_coords.size()=" << barycentric_coords.size() << std::endl;
-    
+{    
     // barycentric_coordsのサイズを適切に設定
     barycentric_coords.resize(ndim_ + 1);
-    std::cout << "DEBUG: barycentric_coords resized to " << barycentric_coords.size() << std::endl;
     
     // 点が凸包の外側にある場合は-1を返す
     if (isPointFullyOutside(point, eps)) {
-        std::cout << "DEBUG: Point is fully outside" << std::endl;
         return -1;
     }
 
     // 単体が存在しない場合は-1を返す
     if (nsimplex_ <= 0) {
-        std::cout << "DEBUG: No simplices available" << std::endl;
         return -1;
     }
 
@@ -83,18 +71,13 @@ int Delaunay::findSimplex(
     if (isimplex < 0 || isimplex >= static_cast<int>(nsimplex_)) {
         isimplex = 0;
     }
-    std::cout << "DEBUG: Starting simplex search from index " << isimplex << std::endl;
 
     // 点をパラボロイド変換
     std::vector<double> lifted_point;
-    std::cout << "DEBUG: About to lift point..." << std::endl;
     liftPoint(point, lifted_point);
-    std::cout << "DEBUG: Point lifted to " << lifted_point.size() << " dimensions" << std::endl;
 
     // Walk the tessellation searching for a facet with a positive planar distance
-    std::cout << "DEBUG: About to call distplane..." << std::endl;
     double best_dist = distplane(isimplex, lifted_point);
-    std::cout << "DEBUG: Initial distance: " << best_dist << std::endl;
 
     bool changed = true;
     while (changed) {
@@ -106,34 +89,26 @@ int Delaunay::findSimplex(
         changed = false;
 
         for (size_t k = 0; k < ndim_ + 1; ++k) {
-            std::cout << "DEBUG: Checking neighbor " << k << " of simplex " << isimplex << std::endl;
             
             // 境界チェック
             if (isimplex >= static_cast<int>(neighbors_.size())) {
-                std::cout << "DEBUG: isimplex " << isimplex << " >= neighbors_.size() " << neighbors_.size() << std::endl;
                 continue;
             }
             
             if (k >= neighbors_[isimplex].size()) {
-                std::cout << "DEBUG: k " << k << " >= neighbors_[" << isimplex << "].size() " << neighbors_[isimplex].size() << std::endl;
                 continue;
             }
             
             // SciPy互換: 単体isimplexのk番目の隣接単体を取得
             int ineigh = neighbors_[isimplex][k];
-            std::cout << "DEBUG: Neighbor " << k << " is simplex " << ineigh << std::endl;
             
             if (ineigh == -1) {
-                std::cout << "DEBUG: Neighbor is boundary (-1)" << std::endl;
                 continue;
             }
             
-            std::cout << "DEBUG: About to call distplane for neighbor " << ineigh << std::endl;
             double dist = distplane(ineigh, lifted_point);
 
-            std::cout << "DEBUG: Neighbor distance: " << dist << ", best_dist: " << best_dist << std::endl;
             if (dist > best_dist + eps * (1.0 + std::abs(best_dist))) {
-                std::cout << "DEBUG: Moving to neighbor " << ineigh << std::endl;
                 isimplex = ineigh;
                 best_dist = dist;
                 changed = true;
@@ -157,19 +132,15 @@ void Delaunay::update(Qhull& qhull)
     qhull.triangulate();
 
     // 2. パラボロイド変換パラメータの取得
-    std::cout << "DEBUG: About to get paraboloid shift/scale..." << std::endl;
     auto ps = qhull.getParaboloidShiftScale();
     paraboloid_shift_ = ps.first;
     paraboloid_scale_ = ps.second;
-    std::cout << "DEBUG: Paraboloid shift=" << paraboloid_shift_ << ", scale=" << paraboloid_scale_ << std::endl;
 
     // 3. 幾何データの抽出
-    std::cout << "DEBUG: About to get simplex facet array..." << std::endl;
     std::tie(simplices_, neighbors_, equations_, coplanar_, good_) = qhull.getSimplexFacetArray();
 
     // 4. 単体数を保存
     nsimplex_ = simplices_.size();
-    std::cout << "DEBUG: Got " << nsimplex_ << " simplices" << std::endl;
 
     // 5. 遅延計算フラグの初期化
     // C++では、遅延評価されるポインタをnullptrに、フラグをfalseに設定する
@@ -181,22 +152,15 @@ void Delaunay::update(Qhull& qhull)
     // --- `_QhullUser._update` の処理 ---
     // -----------------------------------
     // 6. 最後に共通属性を計算する
-    std::cout << "DEBUG: About to calculate bounds..." << std::endl;
-    calculateBounds();
-    
-    std::cout << "DEBUG: Delaunay::update() completed" << std::endl;
+    calculateBounds();    
 }
 
-void Delaunay::calculateBounds() {
-    std::cout << "DEBUG: calculateBounds called with " << npoints_ << " points, ndim_=" << ndim_ << std::endl;
-    
+void Delaunay::calculateBounds() {    
     if (npoints_ == 0) {
-        std::cout << "DEBUG: No points, skipping bounds calculation" << std::endl;
         return;
     }
     
     if (points_.empty() || points_[0].size() != ndim_) {
-        std::cout << "DEBUG: Invalid points array in calculateBounds" << std::endl;
         return;
     }
 
@@ -204,12 +168,9 @@ void Delaunay::calculateBounds() {
     min_bound_ = points_[0];
     max_bound_ = points_[0];
     
-    std::cout << "DEBUG: Initial bounds set from point 0: [" << min_bound_[0] << ", " << min_bound_[1] << "]" << std::endl;
-
     // 2番目以降の点で比較して更新
     for (size_t i = 1; i < npoints_; ++i) {
         if (i >= points_.size() || points_[i].size() != ndim_) {
-            std::cout << "DEBUG: Invalid point " << i << " in calculateBounds" << std::endl;
             continue;
         }
         
@@ -217,49 +178,35 @@ void Delaunay::calculateBounds() {
             min_bound_[j] = std::min(min_bound_[j], points_[i][j]);
             max_bound_[j] = std::max(max_bound_[j], points_[i][j]);
         }
-    }
-    
-    std::cout << "DEBUG: Final bounds: min=[" << min_bound_[0] << ", " << min_bound_[1] << "], max=[" << max_bound_[0] << ", " << max_bound_[1] << "]" << std::endl;
+    }    
 }
 
 bool Delaunay::isPointFullyOutside(const std::vector<double>& point, double eps) const noexcept 
-{
-    std::cout << "DEBUG: isPointFullyOutside called for point size " << point.size() << ", ndim_=" << ndim_ << std::endl;
-    std::cout << "DEBUG: min_bound_ size: " << min_bound_.size() << ", max_bound_ size: " << max_bound_.size() << std::endl;
-    
+{    
     if (point.size() != ndim_ || min_bound_.size() != ndim_ || max_bound_.size() != ndim_) {
-        std::cout << "DEBUG: Size mismatch in isPointFullyOutside" << std::endl;
         return true; // 安全のためtrueを返す
     }
     
     try {
-        for (size_t j = 0; j < ndim_; ++j) {
-            std::cout << "DEBUG: Checking dimension " << j << " of " << ndim_ << std::endl;
-            
+        for (size_t j = 0; j < ndim_; ++j) {            
             // 境界チェック
             if (j >= point.size() || j >= min_bound_.size() || j >= max_bound_.size()) {
-                std::cout << "DEBUG: Index " << j << " out of bounds" << std::endl;
                 return true;
             }
             
             double point_val = point[j];
             double min_val = min_bound_[j];
             double max_val = max_bound_[j];
-            
-            std::cout << "DEBUG: point[" << j << "]=" << point_val << ", bounds=[" << min_val << ", " << max_val << "]" << std::endl;
-            
+                        
             // 点の座標が境界の最小値より小さいか、最大値より大きい場合
             if (point_val < min_val - eps || point_val > max_val + eps) {
-                std::cout << "DEBUG: Point is outside in dimension " << j << ": " << point_val << " not in [" << (min_val - eps) << ", " << (max_val + eps) << "]" << std::endl;
                 return true;
             }
         }
     } catch (...) {
-        std::cout << "DEBUG: Exception in isPointFullyOutside" << std::endl;
         return true;
     }
     
-    std::cout << "DEBUG: Point is inside bounds" << std::endl;
     return false;
 }
 
@@ -438,7 +385,6 @@ int Delaunay::findSimplexBruteforce(
         try {
             transform_matrix_for_simplex = get_transform_for_simplex(isimplex); // ヘルパー関数を仮定
         } catch (const std::exception& e) {
-            std::cout << "DEBUG: Exception in brute force for simplex " << isimplex << ": " << e.what() << std::endl;
             continue; // この単体をスキップして次へ
         }
 
@@ -471,7 +417,6 @@ int Delaunay::findSimplexBruteforce(
                 try {
                     neighbor_transform = get_transform_for_simplex(ineighbor);
                 } catch (const std::exception& e) {
-                    std::cout << "DEBUG: Exception getting neighbor transform: " << e.what() << std::endl;
                     continue;
                 }
 
@@ -604,14 +549,11 @@ std::vector<double> Delaunay::get_transform_for_simplex(int simplex_index) const
 }
 
 void Delaunay::calculateTransformMatrix() const {
-    std::cout << "DEBUG: calculateTransformMatrix() start" << std::endl;
     if (transform_computed_) return;
     
     const size_t nsimplex = simplices_.size();
-    std::cout << "DEBUG: nsimplex=" << nsimplex << ", ndim_=" << ndim_ << std::endl;
     
     if (nsimplex == 0 || ndim_ == 0) {
-        std::cout << "DEBUG: No simplices or invalid dimension, skipping transform calculation" << std::endl;
         const_cast<bool&>(transform_computed_) = true;
         return;
     }
@@ -622,17 +564,14 @@ void Delaunay::calculateTransformMatrix() const {
         
         // 各単体について変換行列を計算
         for (size_t isimplex = 0; isimplex < nsimplex; ++isimplex) {
-            std::cout << "DEBUG: Processing simplex " << isimplex << std::endl;
             
             if (isimplex >= simplices_.size()) {
-                std::cout << "DEBUG: Simplex index out of bounds: " << isimplex << std::endl;
                 continue;
             }
             
             const auto& simplex = simplices_[isimplex];
             
             if (simplex.size() != ndim_ + 1) {
-                std::cout << "DEBUG: Invalid simplex size: " << simplex.size() << " (expected " << (ndim_+1) << ")" << std::endl;
                 continue;
             }
             
@@ -710,16 +649,12 @@ void Delaunay::calculateTransformMatrix() const {
                 if (col < r_n.size()) {
                     const_cast<std::vector<double>&>(transform_)[base_offset + ndim_ * ndim_ + col] = r_n[col];
                 }
-            }
-            
-            std::cout << "DEBUG: Simplex " << isimplex << " processing completed" << std::endl;
+            }            
         }
         
     } catch (const std::exception& e) {
-        std::cout << "DEBUG: Exception in calculateTransformMatrix: " << e.what() << std::endl;
     }
     
-    std::cout << "DEBUG: calculateTransformMatrix() end" << std::endl;
     const_cast<bool&>(transform_computed_) = true;
 }
 
@@ -781,9 +716,7 @@ std::vector<std::vector<double>> Delaunay::pseudoInverseMatrix(const std::vector
     
     const size_t m = matrix.size();        // 行数
     const size_t n = matrix[0].size();     // 列数
-    
-    std::cout << "DEBUG: Computing pseudo-inverse for " << m << "x" << n << " matrix" << std::endl;
-    
+        
     // A^T (転置行列) を計算
     std::vector<std::vector<double>> AT(n, std::vector<double>(m, 0.0));
     for (size_t i = 0; i < m; ++i) {
@@ -806,9 +739,7 @@ std::vector<std::vector<double>> Delaunay::pseudoInverseMatrix(const std::vector
     std::vector<std::vector<double>> ATA_inv;
     try {
         ATA_inv = invertMatrix(ATA);
-        std::cout << "DEBUG: Successfully computed (A^T * A)^-1" << std::endl;
     } catch (const std::exception& e) {
-        std::cout << "DEBUG: Failed to compute (A^T * A)^-1, using regularized version" << std::endl;
         // 正則化: A^T * A + λI を計算
         const double lambda = 1e-6; // 正則化パラメータ
         for (size_t i = 0; i < n; ++i) {
@@ -817,7 +748,6 @@ std::vector<std::vector<double>> Delaunay::pseudoInverseMatrix(const std::vector
         try {
             ATA_inv = invertMatrix(ATA);
         } catch (const std::exception& e2) {
-            std::cout << "DEBUG: Regularized matrix also singular, using minimal solution" << std::endl;
             // 最小限の解として、対角要素のみ設定
             ATA_inv = std::vector<std::vector<double>>(n, std::vector<double>(n, 0.0));
             for (size_t i = 0; i < n; ++i) {
@@ -836,7 +766,6 @@ std::vector<std::vector<double>> Delaunay::pseudoInverseMatrix(const std::vector
         }
     }
     
-    std::cout << "DEBUG: Pseudo-inverse computation completed" << std::endl;
     return pseudo_inv;
 }
 
