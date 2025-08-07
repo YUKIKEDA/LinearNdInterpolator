@@ -25,7 +25,8 @@ LinearNdInterpolator::LinearNdInterpolator(
     setValues(input_values);
 }
 
-std::vector<std::vector<double>> LinearNdInterpolator::interpolate(const std::vector<std::vector<double>>& xi) {
+std::vector<std::vector<double>> LinearNdInterpolator::interpolate(const std::vector<std::vector<double>>& xi) 
+{
     // -----------------------------------
     // --- 1. _preprocess_xi 相当の処理 ---
     // -----------------------------------
@@ -50,7 +51,8 @@ std::vector<std::vector<double>> LinearNdInterpolator::interpolate(const std::ve
     return evaluate(xi);
 }
 
-std::vector<double> LinearNdInterpolator::interpolate(const std::vector<double>& xi) {
+std::vector<double> LinearNdInterpolator::interpolate(const std::vector<double>& xi) 
+{
     // 単一点を点群形式に変換
     std::vector<std::vector<double>> xi_batch = {xi};
     
@@ -63,13 +65,7 @@ std::vector<double> LinearNdInterpolator::interpolate(const std::vector<double>&
 
 void LinearNdInterpolator::calculateTriangulation() 
 {
-    try {
-        tri_ = std::make_unique<qhull::Delaunay>(points_);
-    } catch (const std::exception& e) {
-        throw;
-    } catch (...) {
-        throw;
-    }
+    tri_ = std::make_unique<qhull::Delaunay>(points_);
 }
 
 void LinearNdInterpolator::setValues(const std::vector<std::vector<double>>& input_values) 
@@ -185,6 +181,7 @@ std::vector<std::vector<double>> LinearNdInterpolator::evaluate(const std::vecto
                 continue;
             }
             
+            // HACK: 不要かも
             // 境界チェック
             if (isimplex >= static_cast<int>(simplices.size())) {
                 for (size_t k = 0; k < n_values; ++k) {

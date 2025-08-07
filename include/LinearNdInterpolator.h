@@ -40,8 +40,8 @@ public:
      */
     LinearNdInterpolator(
         const std::vector<std::vector<double>>& input_points,
-        const std::vector<double>& input_values);
-
+        const std::vector<double>& input_values
+    );
     
     /**
      * @brief 多次元値配列を使用するコンストラクタ
@@ -68,8 +68,8 @@ public:
      */
     LinearNdInterpolator(
         const std::vector<std::vector<double>>& input_points,
-        const std::vector<std::vector<double>>& input_values);
-
+        const std::vector<std::vector<double>>& input_values
+    );
 
     /**
      * @brief 指定された点群に対して線形補間を実行するメインメソッド
@@ -254,7 +254,8 @@ private:
      */
     static void checkInitShape(
         const std::vector<std::vector<double>>& p, 
-        const std::vector<std::vector<double>>& v);
+        const std::vector<std::vector<double>>& v
+    );
 
     /**
      * @brief 補間対象の点群データの形状を検証します。
