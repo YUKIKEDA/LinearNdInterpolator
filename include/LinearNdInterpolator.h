@@ -141,6 +141,50 @@ public:
         return evaluate(xi);
     }
 
+    /**
+     * @brief 単一点に対して線形補間を実行するメソッド
+     * 
+     * N次元空間の単一の点において、Delaunay三角分割と重心座標を使用して
+     * 線形補間を実行します。上記のメソッドの単一点版です。
+     * 
+     * 補間プロセス：
+     * 1. 入力点の形状検証
+     * 2. 点をDelaunay三角分割内の単体（simplex）で検索
+     * 3. 重心座標を計算して線形補間を実行
+     * 4. 補間領域外の点にはfill_value_を返す
+     * 
+     * @param xi 補間を実行する単一点。元の点群と同じ次元数である必要があります。
+     * 
+     * @return 補間結果の値ベクトル。形状: [n_values]
+     *         単一点での補間値ベクトルです。
+     * 
+     * @throws std::invalid_argument 以下の場合に例外を投げます：
+     *   - 入力点の次元数が元の点群の次元数と一致しない場合
+     * 
+     * @note 補間領域外（Delaunay三角分割の凸包外）の点には、
+     *       fill_value_（デフォルトはNaN）が返されます。
+     * @note この関数は内部的にDelaunay三角分割を遅延初期化します。
+     * 
+     * @example
+     * ```cpp
+     * std::vector<double> query_point = {0.5, 0.5};
+     * auto result = interp.interpolate(query_point);
+     * 
+     * resultは点(0.5, 0.5)での補間値ベクトル
+     * ```
+     * 
+     */
+    std::vector<double> interpolate(const std::vector<double>& xi) {
+        // 単一点を点群形式に変換
+        std::vector<std::vector<double>> xi_batch = {xi};
+        
+        // 複数点版のinterpolateを呼び出し
+        auto result_batch = interpolate(xi_batch);
+        
+        // 結果の最初の要素（単一点の結果）を返す
+        return result_batch[0];
+    }
+
 private:
     /**
      * @brief 補間に使用するN次元の点群データ
