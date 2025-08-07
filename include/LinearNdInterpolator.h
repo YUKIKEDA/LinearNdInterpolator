@@ -1,5 +1,5 @@
 ﻿#include <vector>
-#include <iostream>
+#include <memory>
 #include "Delaunay.h"
 
 /**

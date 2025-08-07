@@ -1,5 +1,4 @@
 ﻿#include <vector>
-#include <iostream>
 #include "Qhull.h"
 
 namespace qhull {

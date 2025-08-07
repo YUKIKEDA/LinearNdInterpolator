@@ -1,11 +1,8 @@
 ﻿#include <string>
 #include <vector>
-#include <iostream>
 #include <stdexcept>
-#include <memory>
 #include <cmath>
-#include <algorithm>
-#include <cstring>
+#include <tuple>
 
 // Qhull C APIのインクルード - third_partyからの相対パス
 extern "C" {
@@ -35,9 +32,10 @@ private:
     
 public:
     // コンストラクタ - SciPy _Qhull.__init__を参考に実装
-    Qhull(const std::string& command, 
-          const std::vector<std::vector<double>>& points, 
-          const std::string& options);
+    Qhull(
+        const std::string& command, 
+        const std::vector<std::vector<double>>& points, 
+        const std::string& options);
     
     ~Qhull();
 

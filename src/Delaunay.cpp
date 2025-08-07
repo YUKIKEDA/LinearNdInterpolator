@@ -13,8 +13,6 @@ namespace qhull {
 
 Delaunay::Delaunay(const std::vector<std::vector<double>>& input_points) 
 {
-    std::cout << "DEBUG: Delaunay constructor called with " << input_points.size() << " points" << std::endl;
-    
     // --------------------------------------------------
     // Delaunayクラスの __init__ 相当の処理
     // --------------------------------------------------
@@ -151,13 +149,11 @@ int Delaunay::findSimplex(
 
 void Delaunay::update(Qhull& qhull) 
 {
-    std::cout << "DEBUG: Delaunay::update() called" << std::endl;
-    
     // ---------------------------------
     // --- `Delaunay._update` の処理 ---
     // ---------------------------------
     // 1. 三角形分割の実行
-    std::cout << "DEBUG: About to call qhull.triangulate()..." << std::endl;
+
     qhull.triangulate();
 
     // 2. パラボロイド変換パラメータの取得
@@ -281,34 +277,25 @@ void Delaunay::liftPoint(const std::vector<double>& point, std::vector<double>& 
 
 double Delaunay::distplane(int simplex_index, const std::vector<double>& lifted_point) const noexcept 
 {
-    std::cout << "DEBUG: distplane called for simplex " << simplex_index << ", lifted_point size " << lifted_point.size() << std::endl;
-    
     // 境界チェック
     if (simplex_index < 0 || simplex_index >= static_cast<int>(equations_.size())) {
-        std::cout << "DEBUG: Invalid simplex index " << simplex_index << " (equations size: " << equations_.size() << ")" << std::endl;
         return 0.0; // 安全な値を返す
     }
     
     const auto& eq = equations_[simplex_index];
-    std::cout << "DEBUG: Equation size: " << eq.size() << ", expected: " << (ndim_ + 2) << std::endl;
     
     if (eq.size() < ndim_ + 2) {
-        std::cout << "DEBUG: Invalid equation size" << std::endl;
         return 0.0; // 不正なサイズの場合は安全な値を返す
     }
     
     double dist = eq[ndim_ + 1]; // オフセット項
-    std::cout << "DEBUG: Initial distance (offset): " << dist << std::endl;
     
     for (size_t k = 0; k < ndim_ + 1; ++k) {
         if (k < lifted_point.size() && k < eq.size()) {
-            double contribution = eq[k] * lifted_point[k];
-            dist += contribution;
-            std::cout << "DEBUG: k=" << k << ", eq[k]=" << eq[k] << ", lifted_point[k]=" << lifted_point[k] << ", contribution=" << contribution << std::endl;
+            dist += eq[k] * lifted_point[k];
         }
     }
     
-    std::cout << "DEBUG: Final distance: " << dist << std::endl;
     return dist;
 }
 
@@ -319,12 +306,9 @@ int Delaunay::findSimplexDirected(
     double eps, 
     double eps_broad) const noexcept 
 {
-    std::cout << "DEBUG: findSimplexDirected called with start_simplex_hint=" << start_simplex_hint << std::endl;
-    
     int isimplex = start_simplex_hint;
 
     if (isimplex < 0 || isimplex >= static_cast<int>(nsimplex_)) {
-        std::cout << "DEBUG: Invalid start hint, using 0" << std::endl;
         isimplex = 0;
     }
 
@@ -339,20 +323,12 @@ int Delaunay::findSimplexDirected(
             break;
         }
 
-        std::cout << "DEBUG: About to get transform matrix for simplex " << isimplex << std::endl;
-        // TODO: 座標変換行列の計算を行う
-        // NOTE: `transform`行列の計算が必要です。
-        // Scipyでは、この行列はDelaunayオブジェクトの属性として
-        // 遅延評価で計算されます。ここではダミーの行列を使います。
-        std::vector<double> transform_matrix_for_simplex; // ダミー
+        std::vector<double> transform_matrix_for_simplex;
         
         try {
             transform_matrix_for_simplex = get_transform_for_simplex(isimplex);
-            std::cout << "DEBUG: Got transform matrix of size " << transform_matrix_for_simplex.size() << std::endl;
         } catch (const std::exception& e) {
-            std::cout << "DEBUG: Exception getting transform matrix: " << e.what() << std::endl;
             // 特異行列の場合は総当たり検索にフォールバック
-            std::cout << "DEBUG: Falling back to brute force search" << std::endl;
             return findSimplexBruteforce(barycentric_coords, point, eps, eps_broad);
         }
 
@@ -664,7 +640,6 @@ void Delaunay::calculateTransformMatrix() const {
             bool valid_simplex = true;
             for (size_t k = 0; k < simplex.size(); ++k) {
                 if (simplex[k] < 0 || simplex[k] >= static_cast<int>(points_.size())) {
-                    std::cout << "DEBUG: Invalid vertex index: " << simplex[k] << " (max: " << points_.size()-1 << ")" << std::endl;
                     valid_simplex = false;
                     break;
                 }
@@ -677,7 +652,6 @@ void Delaunay::calculateTransformMatrix() const {
             const auto& r_n = points_[simplex[ndim_]]; // 最後の頂点
             
             if (r_n.size() != ndim_) {
-                std::cout << "DEBUG: Invalid point dimension for r_n" << std::endl;
                 continue;
             }
             
@@ -685,7 +659,6 @@ void Delaunay::calculateTransformMatrix() const {
                 const auto& r_j = points_[simplex[j]]; // j番目の頂点
                 
                 if (r_j.size() != ndim_) {
-                    std::cout << "DEBUG: Invalid point dimension for r_j" << std::endl;
                     valid_simplex = false;
                     break;
                 }
@@ -697,27 +670,21 @@ void Delaunay::calculateTransformMatrix() const {
             
             if (!valid_simplex) continue;
             
-            std::cout << "DEBUG: About to call invertMatrix..." << std::endl;
             // T行列の逆行列を計算（LU分解使用）
             std::vector<std::vector<double>> T_inv;
             try {
                 T_inv = invertMatrix(T);
-                std::cout << "DEBUG: invertMatrix completed successfully" << std::endl;
             } catch (const std::exception& e) {
-                std::cout << "DEBUG: invertMatrix failed: " << e.what() << std::endl;
                 // 特異行列の場合は、Pseudoinverse（擬似逆行列）を試行する
                 // 退化したsimplexでも、可能な限り妥当な変換行列を作成
                 try {
                     T_inv = pseudoInverseMatrix(T);
-                    std::cout << "DEBUG: Using pseudo-inverse matrix for singular simplex" << std::endl;
                 } catch (const std::exception& pe) {
-                    std::cout << "DEBUG: Pseudo-inverse also failed: " << pe.what() << std::endl;
                     // 最後の手段として、単位行列ベースのフォールバック
                     T_inv = std::vector<std::vector<double>>(ndim_, std::vector<double>(ndim_, 0.0));
                     for (size_t i = 0; i < ndim_; ++i) {
                         T_inv[i][i] = 1.0; // 単位行列
                     }
-                    std::cout << "DEBUG: Using identity matrix fallback for singular simplex" << std::endl;
                 }
             }
             
@@ -726,7 +693,6 @@ void Delaunay::calculateTransformMatrix() const {
             const size_t base_offset = isimplex * (ndim_ + 1) * ndim_;
             
             if (base_offset + (ndim_ + 1) * ndim_ > transform_.size()) {
-                std::cout << "DEBUG: Transform array access out of bounds" << std::endl;
                 continue;
             }
             

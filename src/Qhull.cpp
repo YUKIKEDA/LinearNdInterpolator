@@ -41,7 +41,6 @@ Qhull::Qhull(
     
     // Qhullコンテキストの初期化
     qh_zero(&qh_qh, nullptr);
-    std::cout << "DEBUG: Qhull context initialized" << std::endl;
 }
 
 Qhull::~Qhull() {
@@ -73,8 +72,6 @@ Qhull::~Qhull() {
 void Qhull::triangulate() {
     if (computed_) return;
     
-    std::cout << "DEBUG: Qhull triangulate() called with " << points_.size() << " points, " << ndim_ << "D" << std::endl;
-    
     try {
         // 点群データをQhull形式に変換
         int numpoints = static_cast<int>(points_.size());
@@ -96,8 +93,6 @@ void Qhull::triangulate() {
             qhull_command = "qhull " + options_;
         }
         
-        std::cout << "DEBUG: Running qh_new_qhull with command: " << qhull_command << std::endl;
-        
         // Qhullの実行
         int exitcode = qh_new_qhull(&qh_qh, dim, numpoints, qpoints.data(), 
                                    False, const_cast<char*>(qhull_command.c_str()), 
@@ -111,10 +106,8 @@ void Qhull::triangulate() {
         qh_triangulate(&qh_qh);
         
         computed_ = true;
-        std::cout << "DEBUG: Qhull triangulation completed successfully" << std::endl;
         
     } catch (const std::exception& e) {
-        std::cout << "DEBUG: Qhull triangulation failed: " << e.what() << std::endl;
         throw;
     }
 }
@@ -136,8 +129,6 @@ std::pair<double, double> Qhull::getParaboloidShiftScale() const {
         paraboloid_shift = 0.0;
     }
     
-    std::cout << "DEBUG: Paraboloid shift=" << paraboloid_shift << ", scale=" << paraboloid_scale << std::endl;
-    
     return {paraboloid_shift, paraboloid_scale};
 }
 
@@ -145,8 +136,6 @@ SimplexFacetResult Qhull::getSimplexFacetArray() const {
     if (!computed_) {
         throw std::runtime_error("Triangulation must be computed before accessing results");
     }
-    
-    std::cout << "DEBUG: getSimplexFacetArray() called - using real Qhull API" << std::endl;
     
     std::vector<std::vector<int>> simplices;
     std::vector<std::vector<int>> neighbors;
@@ -176,7 +165,6 @@ SimplexFacetResult Qhull::getSimplexFacetArray() const {
         }
         
         int num_facets = j;
-        std::cout << "DEBUG: Found " << num_facets << " valid facets" << std::endl;
         
         // 結果の配列を初期化
         simplices.resize(num_facets);
@@ -226,10 +214,7 @@ SimplexFacetResult Qhull::getSimplexFacetArray() const {
         // coplanar情報（簡略化）
         coplanar.resize(num_facets);
         
-        std::cout << "DEBUG: Generated " << simplices.size() << " simplices using real Qhull API" << std::endl;
-        
     } catch (const std::exception& e) {
-        std::cout << "DEBUG: Error in getSimplexFacetArray: " << e.what() << std::endl;
         throw;
     }
     
