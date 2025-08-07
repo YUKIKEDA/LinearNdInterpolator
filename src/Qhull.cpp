@@ -81,29 +81,28 @@ Qhull::Qhull(
 }
 
 Qhull::~Qhull() {
-    std::cout << "DEBUG: Qhull destructor called, computed_=" << computed_ << std::endl;
     try {
-        // 一時的にクリーンアップを無効にして問題を特定
-        std::cout << "DEBUG: Qhull cleanup skipped for debugging (memory leak potential)" << std::endl;
-        /*
-        if (computed_ && qh_qh.hull_dim > 0) {
-            std::cout << "DEBUG: About to call qh_freeqhull..." << std::endl;
-            // Qhullの状態をチェックしてからクリーンアップ
-            if (qh_qh.facet_list) {
-                qh_freeqhull(&qh_qh, qh_ALL);
-                qh_memfreeshort(&qh_qh, nullptr, nullptr);
-                std::cout << "DEBUG: Qhull cleanup completed" << std::endl;
-            } else {
-                std::cout << "DEBUG: Qhull cleanup skipped - invalid state" << std::endl;
+        // SciPy準拠: _Qhull.__dealloc__() に対応するクリーンアップ処理
+        if (initialized_) {
+            int curlong, totlong;
+            
+            // SciPy準拠: qh_freeqhull, qh_memfreeshortの順で実行
+            qh_freeqhull(&qh_qh, qh_ALL);
+            qh_memfreeshort(&qh_qh, &curlong, &totlong);
+            
+            // SciPy準拠: メモリリークのチェック（デストラクタでは警告のみ）
+            if (curlong != 0 || totlong != 0) {
+                std::cerr << "qhull: did not free " << totlong << " bytes (" << curlong << " pieces)" << std::endl;
             }
-        } else {
-            std::cout << "DEBUG: Qhull cleanup skipped - not computed or invalid" << std::endl;
+            
+            initialized_ = false;
+            computed_ = false;
         }
-        */
+    } catch (const std::exception& e) {
+        std::cerr << "Exception in Qhull destructor: " << e.what() << std::endl;
     } catch (...) {
-        std::cout << "DEBUG: Exception in Qhull destructor" << std::endl;
+        std::cerr << "Unknown exception in Qhull destructor" << std::endl;
     }
-    std::cout << "DEBUG: Qhull destructor completed" << std::endl;
 }
 
 void Qhull::triangulate() {
