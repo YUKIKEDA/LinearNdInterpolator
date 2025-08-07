@@ -26,6 +26,7 @@ set(LIBRARY_SOURCES
 set(LIBRARY_HEADERS
     include/LinearNdInterpolator.h
     include/Delaunay.h
+    include/Qhull.h
 )
 
 # スタティックライブラリとして作成

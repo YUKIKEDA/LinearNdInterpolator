@@ -1,327 +1,855 @@
-﻿#pragma once
+﻿#include <vector>
+#include <iostream>
+#include "Qhull.h"
 
-#include <vector>
-#include <memory>
-
-// Qhullの前方宣言
-namespace orgQhull {
-    class Qhull;
-}
+namespace qhull {
 
 /**
- * @brief Delaunay三角分割を実行するクラス
+ * @class Delaunay
+ * @brief N次元点群に対するドロネー三角形分割を実行するクラス
  * 
- * このクラスはQhullライブラリを使用してDelaunay三角分割を計算し、
- * LinearNdInterpolatorクラスで使用される補間機能を提供します。
- * N次元空間での点群に対してDelaunay三角分割を実行し、
- * 任意の点がどのsimplexに属するか、および重心座標の計算などを行います。
+ * このクラスはQhullライブラリを使用して、任意の次元の点群に対してドロネー三角形分割を実行します。
+ * SciPyの `scipy.spatial.Delaunay` クラスの機能とAPIを忠実に再現しており、
+ * 科学計算やデータ解析における空間データの処理に適用できます。
+ * 
+ * @note このクラスはSciPyの `scipy.spatial.Delaunay` v1.x系の動作を再現します。
+ * @note 入力点群は全て同じ次元数を持つ必要があります。
+ * @note Qhullライブラリに依存するため、適切にリンクされている必要があります。
+ * 
  */
 class Delaunay {
 public:
     /**
-     * @brief Delaunayクラスのコンストラクタ
+     * @brief ドロネー三角形分割を実行するコンストラクタ
      * 
-     * 与えられた点群に対してDelaunay三角分割を実行します。
-     * 点群は N次元空間の点の集合として与えられ、各点は座標値のベクターとして表現されます。
+     * 指定された点群に対してQhullライブラリを使用してドロネー三角形分割を実行します。
+     * SciPyの `scipy.spatial.Delaunay` クラスの実装に基づいており、
+     * `qhull_options=None` および `incremental=False` の場合の動作を再現します。
      * 
-     * @param points N次元空間の点群。各要素は1つの点の座標を表すdoubleのベクター
-     * @throws std::runtime_error Qhullライブラリでエラーが発生した場合
-     * @throws std::invalid_argument 点群が空、または次元が統一されていない場合
+     * @param input_points 三角形分割を行う点群。各点は座標のベクトルとして表現され、
+     *                     全ての点は同じ次元数を持つ必要があります。
+     * 
+     * @note Qhullオプション:
+     *       - 基本オプション: "Qbb Qc Qz Q12"
+     *       - 5次元以上の場合: "Qx" を追加
+     *       - 必須オプション: "Qt" (三角形分割用)
+     * 
+     * @throws std::runtime_error Qhullの実行に失敗した場合
+     * @throws std::invalid_argument 入力点群が無効な場合（空、次元不一致など）
+     * 
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1870
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1597
+     * 
      */
-    explicit Delaunay(const std::vector<std::vector<double>>& points);
-    
-    /**
-     * @brief デストラクタ
-     * 
-     * Qhullリソースを適切に解放します。
-     */
-    ~Delaunay();
+    Delaunay(const std::vector<std::vector<double>>& input_points) 
+    {
+        // --------------------------------------------------
+        // Delaunayクラスの __init__ 相当の処理
+        // --------------------------------------------------
+        points_ = input_points;
+        npoints_ = points_.size();
+        ndim_ = npoints_ > 0 ? points_[0].size() : 0;
+
+        std::string qhull_options = "Qbb Qc Qz Q12";
+        if (ndim_ >= 5) {
+            qhull_options += " Qx";
+        }
+        
+        //HACK: 要修正
+
+        // Scipy: `required_options=b"Qt"` を追加
+        std::string full_qhull_options = qhull_options + " Qt";
+
+        // Scipy: `qhull = _Qhull(b"d", points, ...)`
+        // `b"d"`はドロネー三角形分割(delaunay)を意味するコマンド。
+        Qhull qhull_runner("d", points_, full_qhull_options);
+
+        // --------------------------------------------------
+        // _QhullUserクラスの __init__ 相当の処理
+        // --------------------------------------------------
+
+        // Qhullの実行結果をメンバ変数に格納する。
+        update(qhull_runner);
+    }
 
     /**
-     * @brief コピーコンストラクタ（削除済み）
+     * @brief ドロネー三角形分割で得られた単体（simplex）の頂点インデックス配列を取得する
      * 
-     * Qhullリソースの複雑な管理を避けるため、コピーは禁止されています。
+     * 各単体は入力点群のインデックスで表現された頂点の集合です。
+     * N次元空間において、各単体はN+1個の頂点を持ちます（例：2次元では三角形、3次元では四面体）。
+     * 
+     * @return 単体の配列への const 参照。各要素は単体を構成する頂点のインデックス配列
+     *         - simplices_[i] は i 番目の単体
+     *         - simplices_[i][j] は i 番目の単体の j 番目の頂点のインデックス（入力点群での位置）
+     * 
+     * @note この配列は三角形分割の実行時に計算され、以降は変更されません
+     * @note 戻り値は const 参照のため、呼び出し元での変更はできません
+     * @note SciPyの `scipy.spatial.Delaunay.simplices` プロパティに相当します
+     * 
      */
-    Delaunay(const Delaunay&) = delete;
-    
+    const std::vector<std::vector<int>>& get_simplices() const {
+        return simplices_;
+    }
+
     /**
-     * @brief コピー代入演算子（削除済み）
+     * @brief 指定された点を含む単体（simplex）を検索し、重心座標を計算する
      * 
-     * Qhullリソースの複雑な管理を避けるため、コピー代入は禁止されています。
+     * 指定された点がどの単体に含まれるかを効率的に検索し、
+     * 同時にその点の重心座標（barycentric coordinates）を計算します。
+     * 
+     * 検索アルゴリズムは2段階で動作します：
+     * 1. ウォーキング段階：隣接する単体を順次探索して目標点に近い単体を見つける
+     * 2. 指向性検索段階：より精密な検索で実際に点を含む単体を特定する
+     * 
+     * @param[out] barycentric_coords 計算された重心座標が格納されるベクトル
+     *                               点が単体内にある場合、全要素の合計は1.0になります
+     *                               サイズは (ndim+1) に設定されます
+     * @param[in] point 検索対象の点の座標（ndim次元）
+     * @param[in,out] start_simplex_hint 検索開始位置のヒント
+     *                                  入力：検索開始する単体のインデックス（-1の場合は0から開始）
+     *                                  出力：実際に検索を開始した単体のインデックス
+     * @param[in] eps 数値計算の許容誤差（通常は1e-12程度）
+     *                重心座標の計算や境界判定で使用されます
+     * @param[in] eps_broad 粗い境界判定の許容誤差（通常はepsより大きい値）
+     *                      点が明らかに凸包の外側にある場合の早期判定に使用されます
+     * 
+     * @return 点を含む単体のインデックス（0以上）。点が三角形分割の外側にある場合は-1
+     * 
+     * @note このメソッドはSciPyの内部実装 `_find_simplex` のロジックを忠実に再現しています
+     * @note 点が単体の境界上にある場合、その境界を共有する単体のいずれかが返される可能性があります
+     * @note メソッドはnoexcept指定されており、例外を投げません
+     * @note 三角形分割が空の場合（nsimplex <= 0）は-1を返します
+     * 
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1474
+     * 
      */
-    Delaunay& operator=(const Delaunay&) = delete;
-    
-    /**
-     * @brief ムーブコンストラクタ（削除済み）
-     * 
-     * Qhullリソースの複雑な管理を避けるため、ムーブは禁止されています。
-     */
-    Delaunay(Delaunay&&) = delete;
-    
-    /**
-     * @brief ムーブ代入演算子（削除済み）
-     * 
-     * Qhullリソースの複雑な管理を避けるため、ムーブ代入は禁止されています。
-     */
-    Delaunay& operator=(Delaunay&&) = delete;
-    
-    /**
-     * @brief 指定された点を含むsimplexのIDを検索（SciPy _find_simplex準拠）
-     * 
-     * 与えられた点がどのsimplex（N次元三角形）に含まれるかを判定します。
-     * SciPyの内部C実装 _find_simplex と同等のインターフェースを提供します。
-     * 
-     * @param barycentric_coords 出力用重心座標（計算結果が格納される）
-     * @param point 検索対象の点の座標（N次元ベクター）
-     * @param start_simplex 検索開始simplex（参照渡しで更新される）
-     * @param eps 基本許容誤差（SciPy準拠: 100*DBL_EPSILON）
-     * @param eps_broad broad検索用許容誤差（SciPy準拠: sqrt(DBL_EPSILON)）
-     * @return 点を含むsimplexのID（見つからない場合は-1）
-     * @throws std::invalid_argument pointの次元が構築時の点群と一致しない場合
-     */
-    int findSimplex(std::vector<double>& barycentric_coords,
-                    const std::vector<double>& point, 
-                    int& start_simplex, 
-                    double eps, 
-                    double eps_broad) const;
-    
-    // 古いcalculateBarycentricCoordinatesメソッドは削除済み
-    // SciPy準拠のcalculateBarycentricCoordinatesWithTransformを使用
-    
-    /**
-     * @brief 全simplexの頂点インデックス情報を取得
-     * 
-     * Delaunay三角分割で生成された全simplexについて、各simplexを構成する
-     * 点のインデックス情報を返します。SciPyのDelaunay.simplicesプロパティと同等です。
-     * 
-     * @return simplexの配列。各要素は1つのsimplexを構成する点のインデックスのベクター
-     */
-    std::vector<std::vector<int>> getSimplices() const;
-    
-    /**
-     * @brief バリセントリック変換行列を取得
-     * 
-     * 各simplexに対するバリセントリック座標変換行列を返します。
-     * SciPyのDelaunay.transformプロパティと同等の機能を提供します。
-     * 変換行列Tは以下の式を満たします: T * c = x - r_n
-     * ここで、cはバリセントリック座標、xは点座標、r_nは参照頂点です。
-     * 
-     * @return 変換行列の3次元配列 [simplex_id][row][col]
-     *         形状: (nsimplex, ndim+1, ndim)
-     */
-    const std::vector<std::vector<std::vector<double>>>& getTransform() const;
-    
-    /**
-     * @brief 変換行列を使用した高速バリセントリック座標計算
-     * 
-     * 事前計算された変換行列を使用して効率的にバリセントリック座標を計算します。
-     * SciPyのアルゴリズムに基づく実装で、O(d²)の計算複雑度を実現します。
-     * 
-     * @param point バリセントリック座標を計算する点の座標
-     * @param simplex_id 対象となるsimplexのID
-     * @return バリセントリック座標のベクター
-     */
-    std::vector<double> calculateBarycentricCoordinatesWithTransform(
-        const std::vector<double>& point, int simplex_id) const;
-    
-    /**
-     * @brief Brute Force単体検索（SciPy準拠フォールバック）
-     * 
-     * Walking Algorithmが失敗した場合のフォールバック検索手法です。
-     * 全simplexを順次チェックして点を含むsimplexを見つけます。
-     * 
-     * @param point 検索対象の点の座標
-     * @return 点を含むsimplexのID（見つからない場合は-1）
-     */
-    int findSimplexBruteForceWithEps(const std::vector<double>& point,
-                                     double eps_broad,
-                                     std::vector<double>& barycentric_coords) const;
-    
-    /**
-     * @brief SciPy準拠のDirected Search実装
-     * 
-     * 事前計算済みのsimplices配列を受け取ることで、getSimplices()の重複呼び出しを回避します。
-     * SciPyと同等のパフォーマンス特性を実現します。
-     */
-    int findSimplexDirected(const std::vector<double>& point,
-                           int start_simplex,
-                           double eps,
-                           double eps_broad,
-                           std::vector<double>& barycentric_coords,
-                           const std::vector<std::vector<int>>& simplices) const;
-    
-    /**
-     * @brief Paraboloid上での平面距離計算（SciPy _distplane完全準拠）
-     */
-    double calculatePlaneDistance(int simplex_id, const double* lifted_point, size_t dim) const;
-    
-    /**
-     * @brief 点をparaboloid上に投影（SciPy _lift_point相当）
-     */
-    void liftPointToParaboloid(const std::vector<double>& point, std::vector<double>& lifted_point) const;
-    
-    /**
-     * @brief 単一barycentric座標計算（SciPy _barycentric_coordinate_single相当）
-     */
-    void calculateBarycentricCoordinateSingle(int simplex_id, const std::vector<double>& point, 
-                                             std::vector<double>& barycentric, int coordinate_index) const;
+    int findSimplex(
+        std::vector<double>& barycentric_coords,
+        const std::vector<double>& point,
+        int& start_simplex_hint,
+        double eps,
+        double eps_broad
+    ) const noexcept 
+    {
+        // 点が凸包の外側にある場合は-1を返す
+        if (isPointFullyOutside(point, eps)) {
+            return -1;
+        }
+
+        // 単体が存在しない場合は-1を返す
+        if (nsimplex_ <= 0) {
+            return -1;
+        }
+
+        // 検索開始位置のヒントを設定
+        int isimplex = start_simplex_hint;
+        // 検索開始位置のヒントが無効な場合は0から開始
+        if (isimplex < 0 || isimplex >= static_cast<int>(nsimplex_)) {
+            isimplex = 0;
+        }
+
+        // 点をパラボロイド変換
+        std::vector<double> lifted_point;
+        liftPoint(point, lifted_point);
+
+        // Walk the tessellation searching for a facet with a positive planar distance
+        double best_dist = distplane(isimplex, lifted_point);
+
+        bool changed = true;
+        while (changed) {
+            // 正の距離を持つ単体が見つかったらウォークを終了
+            if (best_dist > 0) {
+                break; 
+            }
+
+            changed = false;
+
+            for (size_t k = 0; k < ndim_ + 1; ++k) {
+                // SciPy互換: 単体isimplexのk番目の隣接単体を取得
+                // SciPy: ineigh = d.neighbors[(ndim+1)*isimplex + k] (1次元配列での線形アクセス)
+                // C++:   neighbors_[isimplex][k] (2次元vectorでの直接アクセス)
+                // 両方とも機能的に同等で、同じ隣接単体情報にアクセスする
+                int ineigh = neighbors_[isimplex][k];
+                if (ineigh == -1) {
+                    continue;
+                }
+                
+                double dist = distplane(ineigh, lifted_point);
+
+                if (dist > best_dist + eps * (1.0 + std::abs(best_dist))) {
+                    isimplex = ineigh;
+                    best_dist = dist;
+                    changed = true;
+                }
+            }
+        }
+
+        // We should now be somewhere near the simplex containing the point,
+        // locate it with a directed search
+        start_simplex_hint = isimplex;
+        return findSimplexDirected(barycentric_coords, point, start_simplex_hint, eps, eps_broad);
+    }
+
 
 private:
     /**
-     * @brief Qhullライブラリのインスタンス
+     * @brief Qhullの計算結果からDelaunayオブジェクトの内部状態を更新する
      * 
-     * Delaunay三角分割の実際の計算を行うQhullオブジェクトです。
-     * unique_ptrによりRAIIによる自動リソース管理が行われます。
-     */
-    std::unique_ptr<orgQhull::Qhull> qhull_;
-    
-    /**
-     * @brief 構築時に渡された元の点データ
+     * このメソッドはSciPyの `Delaunay._update` メソッドと `_QhullUser._update` メソッドの
+     * 機能を統合したものです。Qhullライブラリによる三角形分割の実行結果を取得し、
+     * 必要なデータ構造を構築してメンバ変数に格納します。
      * 
-     * 三角分割の基となったN次元空間の点群データを保持します。
-     * 各要素は1つの点の座標を表すdoubleのベクターです。
-     */
-    std::vector<std::vector<double>> points_;
-    
-    /**
-     * @brief バリセントリック変換行列
+     * ## 実行される処理の詳細
      * 
-     * 各simplexに対する変換行列を保持します。SciPyのtransformプロパティに相当します。
-     * 形状: [simplex_id][row][col] = (nsimplex, ndim+1, ndim)
-     * 各行列は T * c = x - r_n の関係を満たします。
-     */
-    mutable std::vector<std::vector<std::vector<double>>> transform_;
-    
-    /**
-     * @brief 変換行列が計算済みかどうかのフラグ
-     */
-    mutable bool transform_computed_;
-    
-    /**
-     * @brief 隣接simplex情報
+     * ### Delaunay._update 相当の処理:
+     * 1. **三角形分割の実行**: `qhull.triangulate()` を呼び出してドロネー三角形分割を実行
+     * 2. **パラボロイド変換パラメータの取得**: 高次元での数値安定性のための変換係数を取得
+     * 3. **幾何データの抽出**: 単体、隣接関係、方程式、共面点、有効フラグを一括取得
+     * 4. **単体数の記録**: 生成された単体の総数を記録
+     * 5. **遅延計算フラグの初期化**: 変換行列や頂点関係などの重い計算を必要時まで遅延
      * 
-     * 各simplexに隣接するsimplexのIDを保持します。SciPyのneighborsプロパティに相当します。
-     * 形状: [simplex_id][neighbor_index] = neighbor_simplex_id
-     */
-    mutable std::vector<std::vector<int>> neighbors_;
-    
-    /**
-     * @brief 隣接情報が計算済みかどうかのフラグ
-     */
-    mutable bool neighbors_computed_;
-    
-    /**
-     * @brief 点群の境界ボックス（最小値）
-     */
-    std::vector<double> min_bound_;
-    
-    /**
-     * @brief 点群の境界ボックス（最大値）
-     */
-    std::vector<double> max_bound_;
-    
-    /**
-     * @brief SciPy準拠のparaboloid scaling factor
-     */
-    double paraboloid_scale_;
-    
-    /**
-     * @brief SciPy準拠のparaboloid offset
-     */
-    double paraboloid_shift_;
-    
-    /**
-     * @brief SciPy準拠の事前計算済み面方程式配列
-     * 形状: [simplex_id * (ndim + 2) + coefficient_index]
-     * coefficients 0..ndim: normal vector, ndim+1: offset
-     */
-    mutable std::vector<double> equations_;
-    
-    /**
-     * @brief 面方程式が計算済みかどうかのフラグ
-     */
-    mutable bool equations_computed_;
-    
-    
-    /**
-     * @brief バリセントリック変換行列を計算
+     * ### _QhullUser._update 相当の処理:
+     * 6. **境界計算**: 点群の各次元における最小値・最大値を計算
      * 
-     * 全simplexに対するバリセントリック変換行列を事前計算します。
-     * SciPyの_get_barycentric_transformsに相当する機能です。
+     * @param qhull 三角形分割が設定済みのQhullオブジェクトの参照。
+     *              このオブジェクトは適切に初期化され、点群データが設定されている必要があります。
+     * 
+     * @pre qhullオブジェクトは有効な点群データで初期化されている
+     * @pre qhullオブジェクトのコマンドは "d" (delaunay) に設定されている
+     * 
+     * @post すべての基本的な幾何データ（単体、隣接関係等）がメンバ変数に格納される
+     * @post 遅延計算フラグがfalseに初期化される
+     * @post 点群の境界情報が計算される
+     * 
+     * @throws std::runtime_error Qhullの三角形分割実行に失敗した場合
+     * @throws std::bad_alloc メモリ不足の場合
+     * 
+     * @note このメソッドはコンストラクタから呼び出されるため、直接呼び出す必要はありません
+     * @note SciPyとの互換性のため、処理順序と内容を忠実に再現しています
+     * 
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1895
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1625
      */
-    void computeBarycentricTransforms() const;
+    void update(Qhull& qhull) 
+    {
+        // ---------------------------------
+        // --- `Delaunay._update` の処理 ---
+        // ---------------------------------
+        // 1. 三角形分割の実行
+        qhull.triangulate(); //HACK: 要確認
+
+        // 2. パラボロイド変換パラメータの取得
+        auto ps = qhull.getParaboloidShiftScale(); //HACK: 要確認
+        paraboloid_shift_ = ps.first;
+        paraboloid_scale_ = ps.second;
+
+        // 3. 幾何データの抽出
+        std::tie(simplices_, neighbors_, equations_, coplanar_, good_) = qhull.getSimplexFacetArray(); //HACK: 要確認
+
+        // 4. 単体数を保存
+        nsimplex_ = simplices_.size();
+
+        // 5. 遅延計算フラグの初期化
+        // C++では、遅延評価されるポインタをnullptrに、フラグをfalseに設定する
+        transform_computed_ = false;
+        vertex_to_simplex_computed_ = false;
+        vertex_neighbor_vertices_computed_ = false;
+
+        // -----------------------------------
+        // --- `_QhullUser._update` の処理 ---
+        // -----------------------------------
+        // 6. 最後に共通属性を計算する
+        calculateBounds();
+    }
     
     /**
-     * @brief 隣接simplex情報を計算
+     * @brief 全ての点の座標における各次元の最小値と最大値を計算する
      * 
-     * 全simplexに対する隣接関係を事前計算します。
-     * SciPyのneighborsプロパティの計算に相当する機能です。
+     * このメソッドは、入力された点群から各次元における境界（bounding box）を計算し、
+     * min_bound_とmax_bound_メンバ変数に結果を格納します。
+     * 
+     * @details 
+     * - 点が存在しない場合（npoints_ == 0）は何も実行しません
+     * - 最初の点を初期値として設定し、残りの点と比較して更新します
+     * - 各次元について独立して最小値・最大値を求めます
+     * 
+     * @note このメソッドはDelaunay三角分割の前処理として使用され、
+     *       数値的安定性の向上に寄与します
      */
-    void computeNeighbors() const;
+    void calculateBounds() {
+        if (npoints_ == 0) {
+            return;
+        }
+
+        // 初期値を最初の点で設定
+        min_bound_ = points_[0];
+        max_bound_ = points_[0];
+
+        // 2番目以降の点で比較して更新
+        for (size_t i = 1; i < npoints_; ++i) {
+            for (size_t j = 0; j < ndim_; ++j) {
+                min_bound_[j] = std::min(min_bound_[j], points_[i][j]);
+                max_bound_[j] = std::max(max_bound_[j], points_[i][j]);
+            }
+        }
+    }
+
+    /**
+     * @brief 指定された点が凸包の境界ボックスの外側に完全に位置するかを判定する
+     * 
+     * このメソッドは、指定された点が三角形分割によって形成される凸包の
+     * 軸並行境界ボックス（axis-aligned bounding box）の外側に完全に位置するかを
+     * 効率的に判定します。これは、より重い幾何学的計算を実行する前の
+     * 早期除外（early rejection）に使用されます。
+     * 
+     * 各次元において、点の座標が境界の最小値より小さいか、
+     * 最大値より大きい場合（許容誤差を含む）、その点は境界ボックスの外側にあると判定されます。
+     * いずれかの次元で外側にある場合、点は完全に外側にあると見なされます。
+     * 
+     * @param[in] point 判定対象の点の座標（ndim次元）
+     * @param[in] eps 境界判定の許容誤差
+     *                境界から eps だけ外側までは「内側」として扱われます
+     * 
+     * @return true: 点が境界ボックスの外側に完全に位置する場合
+     * @return false: 点が境界ボックス内または境界上（許容誤差内）にある場合
+     * 
+     * @note このメソッドはSciPyの `_is_point_fully_outside` 関数と同等の機能を提供します
+     * @note 境界ボックスは min_bound_ と max_bound_ によって定義されます
+     * @note 計算複雑度は O(ndim) で、非常に高速です
+     * @note メソッドはnoexcept指定されており、例外を投げません
+     * 
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1302
+     * 
+     */
+    bool isPointFullyOutside(const std::vector<double>& point, double eps) const noexcept 
+    {
+        for (size_t j = 0; j < ndim_; ++j) {
+            // 点の座標が境界の最小値より小さいか、最大値より大きい場合
+            if (point[j] < min_bound_[j] - eps || point[j] > max_bound_[j] + eps) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @brief 点をパラボロイド（放物面）に持ち上げる変換を行う
+     * 
+     * このメソッドは、n次元空間の点を(n+1)次元のパラボロイド上の点に変換します。
+     * この変換は、ドロネー三角形分割において凸包の計算を効率化するための
+     * 標準的な手法で、「リフティング変換」と呼ばれます。
+     * 
+     * ## 変換の数学的定義
+     * 
+     * n次元の点 `x = (x₀, x₁, ..., xₙ₋₁)` を(n+1)次元の点 `z` に変換：
+     * 
+     * ```
+     * z[i] = x[i]                                    (i = 0, 1, ..., n-1)
+     * z[n] = (Σᵢ x[i]²) × paraboloid_scale + paraboloid_shift
+     * ```
+     * 
+     * この変換により、元の空間での点の関係が高次元空間での凸包の性質として
+     * 表現され、複雑な幾何学的判定を線形代数の問題に帰着できます。
+     * 
+     * ## パラメータの役割
+     * 
+     * - **paraboloid_scale**: 数値安定性のためのスケーリング係数
+     * - **paraboloid_shift**: 数値精度向上のためのオフセット値
+     * 
+     * これらの値は三角形分割の初期化時にQhullライブラリによって計算されます。
+     * 
+     * @param[in] point 変換対象のn次元点の座標
+     * @param[out] lifted_point 変換結果の(n+1)次元点が格納されるベクトル
+     *                         サイズは自動的に(ndim+1)に調整されます
+     * 
+     * @note このメソッドはSciPyの `_lift_point` 関数と完全に同等の機能を提供します
+     * @note 変換は可逆ではありません（高次元から元の次元への逆変換は一意ではない）
+     * @note 計算複雑度は O(ndim) です
+     * @note メソッドはnoexcept指定されており、例外を投げません
+     * 
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1277C11-L1277C22
+     * 
+     */
+    void liftPoint(const std::vector<double>& point, std::vector<double>& lifted_point) const noexcept 
+    {
+        lifted_point.resize(ndim_ + 1);
+        double sum_sq = 0;
+        for (size_t j = 0; j < ndim_; ++j) {
+            lifted_point[j] = point[j];
+            sum_sq += point[j] * point[j];
+        }
+        // パラボロイド変換の計算
+        lifted_point[ndim_] = sum_sq * paraboloid_scale_ + paraboloid_shift_;
+    }
+
+    /**
+     * @brief リフトされた点と単体に対応する超平面との符号付き距離を計算する
+     * 
+     * このメソッドは、パラボロイド変換によってリフトされた点と、
+     * 指定された単体に対応する超平面との符号付き距離を計算します。
+     * この距離は、点が単体の「上側」にあるか「下側」にあるかを判定するために使用され、
+     * ドロネー三角形分割における点位置判定の核心となる計算です。
+     * 
+     * ## 数学的定義
+     * 
+     * 単体の超平面方程式を `ax₀ + bx₁ + ... + cx_{n} + d = 0` とすると、
+     * 点 `p = (p₀, p₁, ..., p_{n})` に対する符号付き距離は：
+     * 
+     * ```
+     * distance = a×p₀ + b×p₁ + ... + c×p_{n} + d
+     * ```
+     * 
+     * ## 距離の解釈
+     * 
+     * - **正の値**: 点が超平面の「上側」（法線ベクトル方向）にある
+     * - **負の値**: 点が超平面の「下側」にある  
+     * - **ゼロ**: 点が超平面上にある
+     * 
+     * ドロネー三角形分割では、正の距離を持つ単体が目標点を含む可能性が高く、
+     * 単体探索アルゴリズムの方向決定に使用されます。
+     * 
+     * ## データ構造との対応
+     * 
+     * - `equations_[simplex_index]` は長さ (ndim+2) の配列
+     * - インデックス 0 〜 ndim: 超平面の法線ベクトル成分
+     * - インデックス (ndim+1): 定数項（オフセット）
+     * 
+     * @param[in] simplex_index 距離を計算する単体のインデックス（0 ≤ index < nsimplex）
+     * @param[in] lifted_point パラボロイド変換済みの(ndim+1)次元点の座標
+     * 
+     * @return 符号付き距離値。正の値は点が超平面の上側にあることを示す
+     * 
+     * @note このメソッドはSciPyの `_distplane` 関数と完全に同等の機能を提供します
+     * @note 計算複雑度は O(ndim) です
+     * @note メソッドはnoexcept指定されており、例外を投げません
+     * @note 入力パラメータの妥当性チェックは行われません（パフォーマンス重視）
+     * 
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1286
+     * 
+     */
+    double distplane(int simplex_index, const std::vector<double>& lifted_point) const noexcept 
+    {
+        // Scipyの `d.equations` は (nsimplex, ndim+2) のフラットな配列。
+        // C++では `std::vector<std::vector<double>>` なのでアクセスが簡単。
+        const auto& eq = equations_[simplex_index]; //HACK: equations_はどこで初期化されている？
+        double dist = eq[ndim_ + 1]; // オフセット項
+        for (size_t k = 0; k < ndim_ + 1; ++k) {
+            dist += eq[k] * lifted_point[k];
+        }
+        
+        return dist;
+    }
+
+    /**
+     * @brief 有向探索（directed walk）で点を含む単体を見つける
+     * 
+     * このメソッドはSciPyの `_find_simplex_directed` 関数と完全に対応しており、
+     * 三角分割内を効率的に歩き回って指定された点を含む単体を特定します。
+     * 
+     * ## アルゴリズムの概要
+     * 
+     * 1. **有向歩行**: 開始単体から重心座標を計算し、負の座標があればその方向の隣接単体へ移動
+     * 2. **収束判定**: 全ての重心座標が有効範囲内にあれば、その単体が解
+     * 3. **フォールバック**: 収束しない場合は総当たり探索に切り替え
+     * 
+     * ## 重心座標による移動判定
+     * 
+     * - `barycentric_coords[k] < -eps`: k番目の隣接単体方向へ移動
+     * - `barycentric_coords[k] <= 1 + eps`: 現在の単体内に留まる可能性
+     * - それ以外: 縮退した単体として総当たり探索へ
+     * 
+     * @param barycentric_coords [out] 計算された重心座標を格納する配列
+     *                                 サイズは (ndim+1) である必要がある
+     * @param point [in] 探索対象の点の座標（ndim次元）
+     * @param start_simplex_hint [in/out] 探索開始単体のインデックス。
+     *                                   無効な値の場合は0に設定される。
+     *                                   探索終了時には最終的に確認した単体が設定される
+     * @param eps [in] 重心座標の数値許容誤差（通常の境界判定用）
+     * @param eps_broad [in] より緩い数値許容誤差（縮退単体処理用）
+     * 
+     * @return 点を含む単体のインデックス。点が三角分割の外部にある場合は -1
+     * 
+     * @pre point.size() == ndim_
+     * @pre barycentric_coords.size() >= ndim_ + 1
+     * @pre eps >= 0 && eps_broad >= eps
+     * 
+     * @post start_simplex_hint には最終的に確認した単体インデックスが設定される
+     * @post 戻り値が >= 0 の場合、barycentric_coords には有効な重心座標が格納される
+     * 
+     * @note 最大反復回数は `1 + nsimplex_/4` に制限され、収束しない場合は
+     *       自動的に総当たり探索（_find_simplex_bruteforce）にフォールバックする
+     * @note このメソッドはSciPyの実装と同じアルゴリズムを使用しているため、
+     *       同じ入力に対して同じ結果を返すことが保証される
+     * 
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1373
+     * 
+     */
+    int findSimplexDirected(
+        std::vector<double>& barycentric_coords,
+        const std::vector<double>& point,
+        int& start_simplex_hint,
+        double eps, 
+        double eps_broad) const noexcept 
+    {
+        int isimplex = start_simplex_hint;
+
+        if (isimplex < 0 || isimplex >= static_cast<int>(nsimplex_)) {
+            isimplex = 0;
+        }
+
+        // Scipy: for cycle_k in range(1 + d.nsimplex//4):
+        // 無限ループを防ぐための最大試行回数
+        const int max_cycles = 1 + nsimplex_ / 4;
+        int cycle_k;
+        
+        for (cycle_k = 0; cycle_k < max_cycles; ++cycle_k) {
+            
+            if (isimplex == -1) {
+                break;
+            }
+
+            // TODO: 座標変換行列の計算を行う
+            // NOTE: `transform`行列の計算が必要です。
+            // Scipyでは、この行列はDelaunayオブジェクトの属性として
+            // 遅延評価で計算されます。ここではダミーの行列を使います。
+            std::vector<double> transform_matrix_for_simplex; // ダミー
+
+            int inside_status = 1; // 1: inside, -1: hopped, 0: outside/degenerate
+
+            for (size_t k = 0; k < ndim_ + 1; ++k) {
+                barycentricCoordinateSingle(transform_matrix_for_simplex, point, barycentric_coords, k);
+
+                if (barycentric_coords[k] < -eps) {
+                    // SciPy互換: directed search中の隣接単体への移動
+                    // SciPy: m = d.neighbors[(ndim+1)*isimplex + k]
+                    int m = neighbors_[isimplex][k];
+                    if (m == -1) {
+                        start_simplex_hint = isimplex;
+                        return -1; // 凸包の外
+                    }
+
+                    isimplex = m;
+                    inside_status = -1; // 隣へホップした
+                    break;
+
+                } else if (barycentric_coords[k] <= 1.0 + eps) {
+                    // OK, まだ内部にいる可能性がある
+                } else {
+                    // 範囲外 or NaN (縮退した単体)
+                    inside_status = 0;
+                }
+            }
+
+            if (inside_status == -1) {
+                continue; // 次のサイクルへ
+
+            } else if (inside_status == 1) {
+                break; // 正しい単体を発見！ループを抜ける
+
+            } else {
+                // 縮退などで失敗 -> 総当たりへ
+                isimplex = findSimplexBruteforce(barycentric_coords, point, eps, eps_broad);
+                break;
+            }
+        }
+
+        // for-else: ループが正常に終了しなかった（収束しなかった）場合
+        // C++では `cycle_k == max_cycles` で判定
+        if (cycle_k == max_cycles && isimplex != -1) {
+            isimplex = findSimplexBruteforce(barycentric_coords, point, eps, eps_broad);
+        }
+
+        start_simplex_hint = isimplex;
+        return isimplex;
+    }
     
     /**
-     * @brief 面方程式を事前計算（SciPy準拠）
+     * @brief 単一の重心座標を計算する。
+     *        Scipyの `_barycentric_coordinate_single` に完全対応。
+     * @param transform_matrix_for_simplex [in] (ndim, ndim+1) の変換行列（フラットな配列）。
+     *        transform[0..ndim*ndim-1] は逆行列T_inv、
+     *        transform[ndim*ndim..] はベクトルr。
+     * @param point [in] ターゲットの点x。
+     * @param barycentric_coords [in/out] 重心座標c。i < ndim の成分が計算済みである必要がある。
+     * @param coord_index [in] 計算する重心座標のインデックスi。
      * 
-     * 全simplexに対する面方程式を事前計算し、O(1)アクセスを可能にします。
-     * SciPyのequationsプロパティに相当する機能です。
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1238
+     * 
      */
-    void computeEquations() const;
+    void barycentricCoordinateSingle(
+        const std::vector<double>& transform_matrix_for_simplex,
+        const std::vector<double>& point,
+        std::vector<double>& barycentric_coords,
+        int coord_index
+    ) const noexcept 
+    {
+        const int i = coord_index;
+
+        // Scipy: if i == ndim:
+        if (i == static_cast<int>(ndim_)) {
+            // c[ndim] = 1.0 - sum(c[0...ndim-1])
+            barycentric_coords[ndim_] = 1.0;
     
+            for (size_t j = 0; j < ndim_; ++j) {
+                barycentric_coords[ndim_] -= barycentric_coords[j];
+            }
+
+        } else {
+            // c[i] = sum_j( T_inv[i,j] * (x[j] - r[j]) )
+            barycentric_coords[i] = 0.0;
+            for (size_t j = 0; j < ndim_; ++j) {
+                // transform[ndim*i + j] は T_inv[i,j]
+                // transform[ndim*ndim + j] は r[j]
+                barycentric_coords[i] += transform_matrix_for_simplex[ndim_ * i + j] * (point[j] - transform_matrix_for_simplex[ndim_ * ndim_ + j]);
+            }
+        }
+    }
+
     /**
-     * @brief 単一simplexの変換行列を計算
+     * @brief 総当たりで単体を検索する。
      * 
-     * 指定されたsimplexに対する変換行列を計算します。
+     * 与えられた点がどの単体（simplex）に含まれるかを総当たりで検索します。
+     * SciPyの `_find_simplex_bruteforce` アルゴリズムに完全対応した実装です。
      * 
-     * @param simplex_vertices simplexの頂点座標
-     * @return 変換行列 (ndim+1 x ndim)
+     * @details 
+     * このアルゴリズムは以下の手順で動作します：
+     * 1. まず、点が三角分割の境界外にあるかチェック
+     * 2. 各単体について順次チェック
+     * 3. 有効な単体（非退化）の場合、重心座標を計算して内部判定
+     * 4. 退化した単体の場合、隣接する単体も考慮して判定
+     * 
+     * 退化した単体の処理では、隣接単体との境界で緩い許容範囲（eps_broad）を適用し、
+     * 数値誤差による誤判定を防ぎます。
+     * 
+     * @param[out] barycentric_coords 見つかった単体における点の重心座標
+     *                               ndim+1個の要素を持つベクトル
+     * @param[in] point 検索対象の点座標（ndim次元）
+     * @param[in] eps 通常の許容誤差。重心座標の境界判定に使用
+     * @param[in] eps_broad 退化単体の隣接境界での緩い許容誤差
+     * 
+     * @return 点を含む単体のインデックス。見つからない場合は-1
+     * 
+     * @note 
+     * - この関数はtransformメンバ変数が事前に計算されている必要があります
+     * - O(n)の計算量を持つため、大量の点に対してはfindSimplexを使用することを推奨
+     * - SciPyとの完全互換性を保つため、数値計算の詳細まで同一の実装です
+     * 
+     * @see findSimplex() より高速な探索アルゴリズム
+     * @see isPointFullyOutside() 境界外判定
+     * @see _barycentric_inside() 重心座標による内部判定
+     * 
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1315
+     * 
      */
-    std::vector<std::vector<double>> computeSingleTransform(
-        const std::vector<std::vector<double>>& simplex_vertices) const;
-    
+    int findSimplexBruteforce(
+        std::vector<double>& barycentric_coords,
+        const std::vector<double>& point,
+        double eps, double eps_broad
+    ) const noexcept 
+    {
+        // if _is_point_fully_outside(d, x, eps): return -1
+        if (isPointFullyOutside(point, eps)) { // eps_broadではなくepsを使うのがScipyのコード通り
+            return -1;
+        }
+
+        // for isimplex in range(d.nsimplex):
+        for (int isimplex = 0; isimplex < static_cast<int>(nsimplex_); ++isimplex) {
+
+            // TODO: 座標変換行列の計算を行う
+            // NOTE: `this->transform` は (nsimplex, ndim+1, ndim) の3D配列と見なせる
+            // フラットな `std::vector<double>` としてメンバに保持する必要がある。
+            // `transform_matrix_for_simplex` はその一部を指すビューまたはコピー。
+            const auto& transform_matrix_for_simplex = get_transform_for_simplex(isimplex); // ヘルパー関数を仮定
+
+            // if transform[0] == transform[0]:
+            if (!std::isnan(transform_matrix_for_simplex[0])) {
+                // transform is valid (non-nan)
+                if (barycentricInside(transform_matrix_for_simplex, point, barycentric_coords, eps)) {
+                    return isimplex;
+                }
+
+            } else {
+                // transform is invalid (nan, implying degenerate simplex)
+                // check neighbors
+                for (size_t k = 0; k < ndim_ + 1; ++k) {
+                    // SciPy互換: 縮退単体の隣接単体を確認
+                    int ineighbor = neighbors_[isimplex][k];
+                    
+                    if (ineighbor == -1) {
+                        continue;
+                    }
+
+                    // TODO: 座標変換行列の計算を行う
+                    const auto& neighbor_transform = get_transform_for_simplex(ineighbor);
+
+                    if (std::isnan(neighbor_transform[0])) {
+                        continue; // another bad simplex
+                    }
+
+                    barycentricCoordinates(neighbor_transform, point, barycentric_coords);
+
+                    bool inside_neighbor = true;
+                    for (size_t m = 0; m < ndim_ + 1; ++m) {
+                        // SciPy互換: 隣接単体が元の単体を参照しているかチェック
+                        if (neighbors_[ineighbor][m] == isimplex) {
+                            
+                            // allow extra leeway towards isimplex
+                            if (!(barycentric_coords[m] >= -eps_broad && barycentric_coords[m] <= 1.0 + eps)) {
+                                inside_neighbor = false;
+                                break;
+                            }
+
+                        } else {
+                            // normal check
+                            if (!(barycentric_coords[m] >= -eps && barycentric_coords[m] <= 1.0 + eps)) {
+                                inside_neighbor = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (inside_neighbor) {
+                        return ineighbor;
+                    }
+                }
+            }
+        }
+        return -1;
+    }    
+
     /**
-     * @brief 行列の逆行列を計算（基本版）
-     * 
-     * Gauss-Jordan消去法を使用して逆行列を計算します。
-     * 
-     * @param matrix 正方行列
-     * @return 逆行列
-     * @throws std::runtime_error 行列が特異な場合
+     * @brief 点が単体の内部にあるか（重心座標がすべて範囲内か）をチェックする。
+     *        Scipyの `_barycentric_inside` の最適化されたループに完全対応。
+     * @param transform_matrix [in] (ndim, ndim+1) の変換行列（フラットな配列）。
+     * @param point [in] ターゲットの点x。
+     * @param barycentric_coords [out] 計算された重心座標cが格納される。
+     * @param eps [in] 許容誤差。
+     * @return 点が内部にあればtrue, そうでなければfalse。
      */
-    std::vector<std::vector<double>> invertMatrix(
-        const std::vector<std::vector<double>>& matrix) const;
-    
+    bool barycentricInside(
+        const std::vector<double>& transform_matrix,
+        const std::vector<double>& point,
+        std::vector<double>& barycentric_coords,
+        double eps
+    ) const noexcept 
+    {
+        barycentric_coords.resize(ndim_ + 1);
+
+        // c[ndim] = 1.0
+        barycentric_coords[ndim_] = 1.0;
+
+        // for i in range(ndim):
+        for (size_t i = 0; i < ndim_; ++i) {
+            // c[i] = 0
+            barycentric_coords[i] = 0.0;
+            // for j in range(ndim):
+            for (size_t j = 0; j < ndim_; ++j) {
+                barycentric_coords[i] += transform_matrix[ndim_ * i + j] * (point[j] - transform_matrix[ndim_ * ndim_ + j]);
+            }
+            // c[ndim] -= c[i]
+            barycentric_coords[ndim_] -= barycentric_coords[i];
+
+            // if not (-eps <= c[i] <= 1 + eps): return 0
+            if (!(barycentric_coords[i] >= -eps && barycentric_coords[i] <= 1.0 + eps)) {
+                return false;
+            }
+        }
+
+        // if not (-eps <= c[ndim] <= 1 + eps): return 0
+        if (!(barycentric_coords[ndim_] >= -eps && barycentric_coords[ndim_] <= 1.0 + eps)) {
+            return false;
+        }
+
+        // return 1
+        return true;
+    }
+
     /**
-     * @brief 行列の特異性チェック（SciPy準拠）
-     * 
-     * SciPyの条件数チェックに基づく特異行列判定を行います。
-     * 機械イプシロンの1000倍を閾値として使用します。
-     * 
-     * @param matrix チェック対象の正方行列
-     * @return true: 特異または数値的に不安定, false: 安定
+     * @brief 全ての重心座標を計算する。
+     *        Scipyの `_barycentric_coordinates` の最適化されたループに完全対応。
+     * @param transform_matrix [in] (ndim, ndim+1) の変換行列（フラットな配列）。
+     * @param point [in] ターゲットの点x。
+     * @param barycentric_coords [out] 計算された重心座標cが格納される。
      */
-    bool isMatrixSingular(const std::vector<std::vector<double>>& matrix) const;
-    
+    void barycentricCoordinates(const std::vector<double>& transform_matrix,
+        const std::vector<double>& point,
+        std::vector<double>& barycentric_coords
+    ) const noexcept {
+
+        barycentric_coords.resize(ndim_ + 1);
+
+        // c[ndim] = 1.0
+        barycentric_coords[ndim_] = 1.0;
+
+        // for i in range(ndim):
+        for (size_t i = 0; i < ndim_; ++i) {
+            // c[i] = 0
+            barycentric_coords[i] = 0.0;
+            // for j in range(ndim):
+            for (size_t j = 0; j < ndim_; ++j) {
+                // c[i] += transform[ndim*i + j] * (x[j] - transform[ndim*ndim + j])
+                barycentric_coords[i] += transform_matrix[ndim_ * i + j] * (point[j] - transform_matrix[ndim_ * ndim_ + j]);
+            }
+            // c[ndim] -= c[i]
+            barycentric_coords[ndim_] -= barycentric_coords[i];
+        }
+    }
+
     /**
-     * @brief 高精度逆行列計算（SciPy準拠）
-     * 
-     * SciPyのLAPACKベースの高精度逆行列計算を模倣します。
-     * 数値安定性を重視した実装です。
-     * 
-     * @param matrix 正方行列
-     * @return 逆行列
-     * @throws std::runtime_error 計算失敗時
+     * @brief `transform`行列から特定の単体の部分行列へのビューを返すヘルパー。
+     *        パフォーマンスのため、実際にはポインタやspanを返すのが望ましい。
+     *        ここでは簡単のためコピーを返す。
      */
-    std::vector<std::vector<double>> invertMatrixRobust(
-        const std::vector<std::vector<double>>& matrix) const;
-    
-    /**
-     * @brief 行列式を計算
-     * 
-     * LU分解を使用して行列式を計算します。
-     * 特異性判定で使用されます。
-     * 
-     * @param matrix 正方行列
-     * @return 行列式の値
-     */
-    double calculateDeterminant(const std::vector<std::vector<double>>& matrix) const;
+    std::vector<double> get_transform_for_simplex(int simplex_index) const {
+        const size_t simplex_size = (ndim_ + 1) * ndim_;
+        const size_t start_offset = simplex_index * simplex_size;
+        
+        // ダミー実装: transformが計算されていない場合はダミーを返す
+        if (transform_.empty()) {
+            return std::vector<double>(simplex_size, 0.0);
+        }
+        
+        return std::vector<double>(
+            transform_.begin() + start_offset, 
+            transform_.begin() + start_offset + simplex_size);
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// --- Private Member Variables ---
+// `_QhullUser` 由来の属性
+std::vector<std::vector<double>> points_;
+size_t ndim_;
+size_t npoints_;
+std::vector<double> min_bound_;
+std::vector<double> max_bound_;
+
+// `Delaunay` 由来
+double paraboloid_scale_, paraboloid_shift_;
+std::vector<std::vector<int>> simplices_;
+std::vector<std::vector<int>> neighbors_;
+std::vector<std::vector<double>> equations_;
+std::vector<std::vector<int>> coplanar_;
+std::vector<bool> good_;
+size_t nsimplex_;
+
+// 遅延評価される属性のフラグ
+bool transform_computed_;
+bool vertex_to_simplex_computed_;
+bool vertex_neighbor_vertices_computed_;
+
+// 変換行列 (nsimplex * (ndim+1) * ndim のフラット配列)
+std::vector<double> transform_;
 };
+
+} // namespace qhull

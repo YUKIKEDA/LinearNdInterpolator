@@ -387,7 +387,7 @@ private:
             const auto& point = xi[i];
 
             // 1) Find the simplex
-            int isimplex = tri_->find_simplex(
+            int isimplex = tri_->findSimplex( //HACK: 要確認
                 barycentric_coords,
                 point,
                 start_simplex_hint,
