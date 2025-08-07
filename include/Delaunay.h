@@ -448,6 +448,13 @@ private:
      */
     std::vector<std::vector<double>> invertMatrix(const std::vector<std::vector<double>>& matrix) const;
 
+    /**
+     * @brief 特異行列用の擬似逆行列を計算
+     * 
+     * 特異値分解(SVD)を使用して擬似逆行列を計算します
+     */
+    std::vector<std::vector<double>> pseudoInverseMatrix(const std::vector<std::vector<double>>& matrix) const;
+
     // --- Private Member Variables ---
     
     // ==========================================

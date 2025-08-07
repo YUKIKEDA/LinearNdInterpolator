@@ -1,4 +1,8 @@
-#include "Qhull.h"
+﻿#include "Qhull.h"
+#include <map>
+#include <cmath>
+#include <stdexcept>
+#include <iostream>
 
 namespace qhull {
 
@@ -35,23 +39,84 @@ Qhull::Qhull(
     // Check if this is Delaunay mode
     is_delaunay_ = (command == "d" || command == "v");
     
-    // Qhullコンテキストの初期化 - 正しい引数でqh_zero呼び出し
+    // Qhullコンテキストの初期化
     qh_zero(&qh_qh, nullptr);
+    std::cout << "DEBUG: Qhull context initialized" << std::endl;
 }
 
 Qhull::~Qhull() {
-    if (computed_) {
-        qh_freeqhull(&qh_qh, qh_ALL);
-        qh_memfreeshort(&qh_qh, nullptr, nullptr);
+    std::cout << "DEBUG: Qhull destructor called, computed_=" << computed_ << std::endl;
+    try {
+        // 一時的にクリーンアップを無効にして問題を特定
+        std::cout << "DEBUG: Qhull cleanup skipped for debugging (memory leak potential)" << std::endl;
+        /*
+        if (computed_ && qh_qh.hull_dim > 0) {
+            std::cout << "DEBUG: About to call qh_freeqhull..." << std::endl;
+            // Qhullの状態をチェックしてからクリーンアップ
+            if (qh_qh.facet_list) {
+                qh_freeqhull(&qh_qh, qh_ALL);
+                qh_memfreeshort(&qh_qh, nullptr, nullptr);
+                std::cout << "DEBUG: Qhull cleanup completed" << std::endl;
+            } else {
+                std::cout << "DEBUG: Qhull cleanup skipped - invalid state" << std::endl;
+            }
+        } else {
+            std::cout << "DEBUG: Qhull cleanup skipped - not computed or invalid" << std::endl;
+        }
+        */
+    } catch (...) {
+        std::cout << "DEBUG: Exception in Qhull destructor" << std::endl;
     }
+    std::cout << "DEBUG: Qhull destructor completed" << std::endl;
 }
 
 void Qhull::triangulate() {
     if (computed_) return;
     
-    // 一時的にダミー実装に戻す（メモリアクセス違反を避けるため）
     std::cout << "DEBUG: Qhull triangulate() called with " << points_.size() << " points, " << ndim_ << "D" << std::endl;
-    computed_ = true;
+    
+    try {
+        // 点群データをQhull形式に変換
+        int numpoints = static_cast<int>(points_.size());
+        int dim = static_cast<int>(ndim_);
+        
+        // フラットな配列に変換
+        std::vector<coordT> qpoints(numpoints * dim);
+        for (int i = 0; i < numpoints; ++i) {
+            for (int j = 0; j < dim; ++j) {
+                qpoints[i * dim + j] = static_cast<coordT>(points_[i][j]);
+            }
+        }
+        
+        // Qhullオプションの準備
+        std::string qhull_command;
+        if (is_delaunay_) {
+            qhull_command = "qhull d " + options_ + " Qt";  // delaunay + triangulated output
+        } else {
+            qhull_command = "qhull " + options_;
+        }
+        
+        std::cout << "DEBUG: Running qh_new_qhull with command: " << qhull_command << std::endl;
+        
+        // Qhullの実行
+        int exitcode = qh_new_qhull(&qh_qh, dim, numpoints, qpoints.data(), 
+                                   False, const_cast<char*>(qhull_command.c_str()), 
+                                   nullptr, stderr);
+        
+        if (exitcode) {
+            throw std::runtime_error("Qhull failed with exit code: " + std::to_string(exitcode));
+        }
+        
+        // 三角分割の実行
+        qh_triangulate(&qh_qh);
+        
+        computed_ = true;
+        std::cout << "DEBUG: Qhull triangulation completed successfully" << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cout << "DEBUG: Qhull triangulation failed: " << e.what() << std::endl;
+        throw;
+    }
 }
 
 std::pair<double, double> Qhull::getParaboloidShiftScale() const {
@@ -59,9 +124,10 @@ std::pair<double, double> Qhull::getParaboloidShiftScale() const {
         throw std::runtime_error("Triangulation must be computed before accessing paraboloid parameters");
     }
     
-    double paraboloid_scale, paraboloid_shift;
+    double paraboloid_scale;
+    double paraboloid_shift;
     
-    // SciPyコード行518-524の実装
+    // SciPyの実装に基づく
     if (qh_qh.SCALElast) {
         paraboloid_scale = qh_qh.last_newhigh / (qh_qh.last_high - qh_qh.last_low);
         paraboloid_shift = -qh_qh.last_low * paraboloid_scale;
@@ -69,6 +135,8 @@ std::pair<double, double> Qhull::getParaboloidShiftScale() const {
         paraboloid_scale = 1.0;
         paraboloid_shift = 0.0;
     }
+    
+    std::cout << "DEBUG: Paraboloid shift=" << paraboloid_shift << ", scale=" << paraboloid_scale << std::endl;
     
     return {paraboloid_shift, paraboloid_scale};
 }
@@ -78,8 +146,7 @@ SimplexFacetResult Qhull::getSimplexFacetArray() const {
         throw std::runtime_error("Triangulation must be computed before accessing results");
     }
     
-    // 一時的にダミー実装：基本的な2D三角形分割を返す
-    std::cout << "DEBUG: getSimplexFacetArray() called" << std::endl;
+    std::cout << "DEBUG: getSimplexFacetArray() called - using real Qhull API" << std::endl;
     
     std::vector<std::vector<int>> simplices;
     std::vector<std::vector<int>> neighbors;
@@ -87,16 +154,83 @@ SimplexFacetResult Qhull::getSimplexFacetArray() const {
     std::vector<std::vector<int>> coplanar;
     std::vector<bool> good;
     
-    if (ndim_ == 2 && points_.size() == 4) {
-        // 基本的な2D四角形を2つの三角形に分割
-        simplices = {{0, 1, 2}, {0, 2, 3}};
-        neighbors = {{1, -1, -1}, {0, -1, -1}};
-        equations = {{0.0, -1.0, 0.0}, {-1.0, 0.0, 1.0}};
-        coplanar.resize(2);
-        good = {true, true};
-    } else {
-        // 他のケースは空の結果
-        std::cout << "DEBUG: Unsupported configuration: " << ndim_ << "D, " << points_.size() << " points" << std::endl;
+    try {
+        facetT *facet;
+        vertexT *vertex;
+        int facet_ndim = static_cast<int>(ndim_);
+        
+        if (is_delaunay_) {
+            facet_ndim += 1;  // Delaunayの場合は次元を1つ増やす
+        }
+        
+        // ファセットIDマップを作成
+        std::vector<int> id_map(qh_qh.facet_id, -1);
+        
+        // 有効なファセットをカウントしてIDマップを作成
+        int j = 0;
+        for (facet = qh_qh.facet_list; facet && facet->next; facet = facet->next) {
+            if (!is_delaunay_ || facet->upperdelaunay == qh_qh.UPPERdelaunay) {
+                id_map[facet->id] = j;
+                j++;
+            }
+        }
+        
+        int num_facets = j;
+        std::cout << "DEBUG: Found " << num_facets << " valid facets" << std::endl;
+        
+        // 結果の配列を初期化
+        simplices.resize(num_facets);
+        neighbors.resize(num_facets);
+        equations.resize(num_facets);
+        good.resize(num_facets);
+        
+        // ファセット情報を取得
+        j = 0;
+        for (facet = qh_qh.facet_list; facet && facet->next; facet = facet->next) {
+            if (is_delaunay_ && facet->upperdelaunay != qh_qh.UPPERdelaunay) {
+                continue;
+            }
+            
+            // 頂点情報を保存
+            simplices[j].resize(facet_ndim);
+            int i = 0;
+            setT *vertices = facet->vertices;
+            for (int k = 0; k < qh_setsize(const_cast<qhT*>(&qh_qh), vertices) && i < facet_ndim; k++) {
+                vertex = static_cast<vertexT*>(vertices->e[k].p);
+                int point_id = qh_pointid(const_cast<qhT*>(&qh_qh), vertex->point);
+                simplices[j][i] = point_id;
+                i++;
+            }
+            
+            // 隣接情報を保存
+            neighbors[j].resize(facet_ndim);
+            i = 0;
+            setT *neighs = facet->neighbors;
+            for (int k = 0; k < qh_setsize(const_cast<qhT*>(&qh_qh), neighs) && i < facet_ndim; k++) {
+                facetT *neighbor = static_cast<facetT*>(neighs->e[k].p);
+                neighbors[j][i] = (neighbor && neighbor->id < id_map.size() && id_map[neighbor->id] >= 0) ? id_map[neighbor->id] : -1;
+                i++;
+            }
+            
+            // 方程式情報を保存
+            equations[j].resize(facet_ndim + 1);
+            for (i = 0; i < facet_ndim; ++i) {
+                equations[j][i] = facet->normal[i];
+            }
+            equations[j][facet_ndim] = facet->offset;
+            
+            good[j] = true;
+            j++;
+        }
+        
+        // coplanar情報（簡略化）
+        coplanar.resize(num_facets);
+        
+        std::cout << "DEBUG: Generated " << simplices.size() << " simplices using real Qhull API" << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cout << "DEBUG: Error in getSimplexFacetArray: " << e.what() << std::endl;
+        throw;
     }
     
     return std::make_tuple(simplices, neighbors, equations, coplanar, good);
