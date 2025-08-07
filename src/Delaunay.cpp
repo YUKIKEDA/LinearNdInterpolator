@@ -11,6 +11,72 @@ namespace qhull {
 // Delaunay クラスの実装
 // ---------------------------------------------------------------------------
 
+/**
+ * @brief ドロネー三角形分割を実行するコンストラクタ
+ * 
+ * このコンストラクタは、入力された点群に対してQhullライブラリを使用して
+ * ドロネー三角形分割を実行し、結果を内部データ構造に格納します。
+ * 
+ * ## 実装の詳細
+ * 
+ * ### 1. メンバ変数の初期化
+ * ```cpp
+ * points_ = input_points;           // 入力点群をコピー
+ * npoints_ = points_.size();        // 点の総数を設定
+ * ndim_ = npoints_ > 0 ? points_[0].size() : 0;  // 次元数を設定
+ * ```
+ * 
+ * ### 2. Qhullオプション文字列の構築
+ * ```cpp
+ * std::string qhull_options = "Qbb Qc Qz Q12";  // 基本オプション
+ * if (ndim_ >= 5) {
+ *     qhull_options += " Qx";       // 5次元以上で追加
+ * }
+ * std::string full_qhull_options = qhull_options + " Qt";  // SciPy互換オプション
+ * ```
+ * 
+ * **オプションの意味:**
+ * - `Qbb`: 境界ボックス計算（数値安定性向上）
+ * - `Qc`: 中心計算
+ * - `Qz`: ゼロ処理
+ * - `Q12`: 12進数出力
+ * - `Qx`: 高次元での追加処理（5次元以上）
+ * - `Qt`: 三角形分割の強制（SciPy互換）
+ * 
+ * ### 3. Qhullオブジェクトの作成と実行
+ * ```cpp
+ * Qhull qhull_runner("d", points_, full_qhull_options);
+ * ```
+ * - コマンド `"d"`: ドロネー三角形分割を指定
+ * - 点群データとオプションを渡してQhullを初期化
+ * 
+ * ### 4. 結果の処理
+ * ```cpp
+ * update(qhull_runner);  // Qhullの結果をメンバ変数に格納
+ * ```
+ * 
+ * @param input_points 三角形分割を行う点群
+ *                     - 形式: `std::vector<std::vector<double>>`
+ *                     - `input_points[i]`: i番目の点の座標ベクトル
+ *                     - `input_points[i][j]`: i番目の点のj次元目の座標
+ *                     - 全ての点は同じ次元数を持つ必要があります
+ * 
+ * @throws std::runtime_error Qhullライブラリの実行に失敗した場合
+ * @throws std::invalid_argument 入力点群が空または次元不一致の場合
+ * 
+ * @note この実装はSciPyの `scipy.spatial.Delaunay.__init__` の動作を
+ *       忠実に再現しています。特にQhullオプションの設定は
+ *       SciPyの実装と完全に一致します。
+ * 
+ * @note コンストラクタ実行後、以下のメンバ変数が初期化されます：
+ *       - `points_`, `npoints_`, `ndim_`: 基本情報
+ *       - `simplices_`, `neighbors_`, `equations_`: 幾何データ
+ *       - `min_bound_`, `max_bound_`: 境界情報
+ * 
+ * @sa SciPy実装: https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1870
+ * @sa QhullUser実装: https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1597
+ * 
+ */
 Delaunay::Delaunay(const std::vector<std::vector<double>>& input_points) 
 {
     // --------------------------------------------------
@@ -127,6 +193,82 @@ int Delaunay::findSimplex(
     return findSimplexDirected(barycentric_coords, point, start_simplex_hint, eps, eps_broad);
 }
 
+/**
+ * @brief Qhullの計算結果からDelaunayオブジェクトの内部状態を更新する
+ * 
+ * このメソッドはSciPyの `Delaunay._update` メソッドと `_QhullUser._update` メソッドの
+ * 機能を統合したものです。Qhullライブラリによる三角形分割の実行結果を取得し、
+ * 必要なデータ構造を構築してメンバ変数に格納します。
+ * 
+ * ## 実装の詳細
+ * 
+ * ### 1. 三角形分割の実行
+ * ```cpp
+ * qhull.triangulate();
+ * ```
+ * Qhullライブラリにドロネー三角形分割の実行を指示します。
+ * 
+ * ### 2. パラボロイド変換パラメータの取得
+ * ```cpp
+ * auto ps = qhull.getParaboloidShiftScale();
+ * paraboloid_shift_ = ps.first;   // オフセット値
+ * paraboloid_scale_ = ps.second;  // スケーリング係数
+ * ```
+ * n次元点を(n+1)次元パラボロイドに変換する際の数値安定性パラメータを取得します。
+ * 
+ * ### 3. 幾何データの一括抽出
+ * ```cpp
+ * std::tie(simplices_, neighbors_, equations_, coplanar_, good_) = qhull.getSimplexFacetArray();
+ * ```
+ * Qhullから以下の幾何データを一括取得：
+ * - `simplices_`: 単体の頂点インデックス配列
+ * - `neighbors_`: 隣接単体関係配列
+ * - `equations_`: 超平面方程式係数配列
+ * - `coplanar_`: 共面点インデックス配列
+ * - `good_`: 単体の有効性フラグ配列
+ * 
+ * ### 4. 単体数の記録
+ * ```cpp
+ * nsimplex_ = simplices_.size();
+ * ```
+ * 生成された単体の総数を記録します。
+ * 
+ * ### 5. 遅延計算フラグの初期化
+ * ```cpp
+ * transform_computed_ = false;
+ * vertex_to_simplex_computed_ = false;
+ * vertex_neighbor_vertices_computed_ = false;
+ * ```
+ * 重い計算を必要時まで遅延させるためのフラグを初期化します。
+ * 
+ * ### 6. 境界情報の計算
+ * ```cpp
+ * calculateBounds();
+ * ```
+ * 点群の各次元における最小値・最大値を計算し、
+ * `min_bound_`と`max_bound_`に格納します。
+ * 
+ * @param qhull 三角形分割が設定済みのQhullオブジェクトの参照。
+ *              このオブジェクトは適切に初期化され、点群データが設定されている必要があります。
+ * 
+ * @pre qhullオブジェクトは有効な点群データで初期化されている
+ * @pre qhullオブジェクトのコマンドは "d" (delaunay) に設定されている
+ * 
+ * @post すべての基本的な幾何データ（単体、隣接関係等）がメンバ変数に格納される
+ * @post 遅延計算フラグがfalseに初期化される
+ * @post 点群の境界情報が計算される
+ * 
+ * @throws std::runtime_error Qhullの三角形分割実行に失敗した場合
+ * @throws std::bad_alloc メモリ不足の場合
+ * 
+ * @note このメソッドはコンストラクタから呼び出されるため、直接呼び出す必要はありません
+ * @note SciPyとの互換性のため、処理順序と内容を忠実に再現しています
+ * @note 遅延評価により、重い計算（変換行列等）は実際に必要になるまで実行されません
+ * 
+ * @sa SciPy実装: https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1895
+ * @sa QhullUser実装: https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1625
+ * 
+ */
 void Delaunay::update(Qhull& qhull) 
 {
     // ---------------------------------
