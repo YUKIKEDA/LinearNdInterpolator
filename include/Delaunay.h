@@ -28,11 +28,6 @@ public:
      * @param input_points 三角形分割を行う点群。各点は座標のベクトルとして表現され、
      *                     全ての点は同じ次元数を持つ必要があります。
      * 
-     * @note Qhullオプション:
-     *       - 基本オプション: "Qbb Qc Qz Q12"
-     *       - 5次元以上の場合: "Qx" を追加
-     *       - 必須オプション: "Qt" (三角形分割用)
-     * 
      * @throws std::runtime_error Qhullの実行に失敗した場合
      * @throws std::invalid_argument 入力点群が無効な場合（空、次元不一致など）
      * 
@@ -65,10 +60,6 @@ public:
      * 指定された点がどの単体に含まれるかを効率的に検索し、
      * 同時にその点の重心座標（barycentric coordinates）を計算します。
      * 
-     * 検索アルゴリズムは2段階で動作します：
-     * 1. ウォーキング段階：隣接する単体を順次探索して目標点に近い単体を見つける
-     * 2. 指向性検索段階：より精密な検索で実際に点を含む単体を特定する
-     * 
      * @param[out] barycentric_coords 計算された重心座標が格納されるベクトル
      *                               点が単体内にある場合、全要素の合計は1.0になります
      *                               サイズは (ndim+1) に設定されます
@@ -89,6 +80,38 @@ public:
      * @note 三角形分割が空の場合（nsimplex <= 0）は-1を返します
      * 
      * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1474
+     * 
+     * @example
+     * ```cpp
+     * std::vector<std::vector<double>> points = {
+     *     {0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}, {0.5, 0.5}
+     * };
+     * Delaunay triangulation(points);
+     * 
+     * std::vector<double> query_point = {0.3, 0.4};
+     * 
+     * std::vector<double> barycentric_coords(3);
+     * 
+     * int start_hint = -1;
+     * 
+     * int simplex_index = triangulation.findSimplex(
+     *     barycentric_coords, query_point, start_hint, 1e-12, 1e-10
+     * );
+     * 
+     * if (simplex_index >= 0) {
+     *     std::cout << "点は単体 " << simplex_index << " に含まれます" << std::endl;
+     *     std::cout << "重心座標: [" << barycentric_coords[0] << ", "
+     *               << barycentric_coords[1] << ", " << barycentric_coords[2] << "]" << std::endl;
+     *     
+     *     double sum = 0.0;
+     *     for (double coord : barycentric_coords) {
+     *         sum += coord;
+     *     }
+     *     std::cout << "重心座標の合計: " << sum << std::endl;
+     * } else {
+     *     std::cout << "点は三角形分割の外側にあります" << std::endl;
+     * }
+     * ```
      * 
      */
     int findSimplex(
