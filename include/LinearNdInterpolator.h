@@ -313,5 +313,5 @@ private:
     /**
      * @brief 1次元のvaluesを2次元に変換するヘルパー関数。
      */
-    static std::vector<std::vector<double>> _convert_to_2d(const std::vector<double>& v);
+    static std::vector<std::vector<double>> convertTo2d(const std::vector<double>& v);
 };

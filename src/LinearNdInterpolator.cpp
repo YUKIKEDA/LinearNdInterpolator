@@ -12,7 +12,7 @@
 LinearNdInterpolator::LinearNdInterpolator(
     const std::vector<std::vector<double>>& input_points,
     const std::vector<double>& input_values)
-    : LinearNdInterpolator(input_points, _convert_to_2d(input_values)) 
+    : LinearNdInterpolator(input_points, convertTo2d(input_values)) 
 {
 }
 
@@ -230,7 +230,7 @@ std::vector<std::vector<double>> LinearNdInterpolator::evaluate(const std::vecto
     return output;
 }
 
-std::vector<std::vector<double>> LinearNdInterpolator::_convert_to_2d(const std::vector<double>& v) {
+std::vector<std::vector<double>> LinearNdInterpolator::convertTo2d(const std::vector<double>& v) {
     std::vector<std::vector<double>> v_2d;
     v_2d.reserve(v.size());
     for (const auto& val : v) {
