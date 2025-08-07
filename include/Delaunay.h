@@ -426,7 +426,7 @@ private:
      * SciPyの`_get_barycentric_transforms()`を参考にした実装で、
      * 重心座標変換 T c = x - r_n を効率的に計算するための行列を生成します。
      */
-    std::vector<double> get_transform_for_simplex(int simplex_index) const;
+    std::vector<double> getBarycentricTransforms(int simplex_index) const;
 
     /**
      * @brief SciPy互換の重心座標変換行列を全単体について計算
