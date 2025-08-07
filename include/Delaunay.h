@@ -439,7 +439,6 @@ private:
      */
     void calculateTransformMatrix() const;
 
-private:
     /**
      * @brief LU分解による行列の逆行列を計算
      * 
