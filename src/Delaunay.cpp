@@ -46,7 +46,7 @@ Delaunay::Delaunay(const std::vector<std::vector<double>>& input_points)
     std::cout << "DEBUG: Delaunay constructor completed" << std::endl;
 }
 
-const std::vector<std::vector<int>>& Delaunay::get_simplices() const {
+const std::vector<std::vector<int>>& Delaunay::getSimplices() const {
     return simplices_;
 }
 

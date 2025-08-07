@@ -130,7 +130,7 @@ std::vector<std::vector<double>> LinearNdInterpolator::evaluate(const std::vecto
         return {};
     }
     
-    const auto& simplices = tri_->get_simplices();
+    const auto& simplices = tri_->getSimplices();
     
     if (simplices.empty()) {
         const size_t ndim = xi[0].size();

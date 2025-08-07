@@ -57,7 +57,7 @@ public:
      * @note SciPyの `scipy.spatial.Delaunay.simplices` プロパティに相当します
      * 
      */
-    const std::vector<std::vector<int>>& get_simplices() const;
+    const std::vector<std::vector<int>>& getSimplices() const;
 
     /**
      * @brief 指定された点を含む単体（simplex）を検索し、重心座標を計算する
@@ -576,7 +576,7 @@ private:
      * - サイズ: `nsimplex_ × (ndim_+1)`
      * 
      * Qhullライブラリによって計算され、
-     * `get_simplices()` メソッドで取得できます。
+     * `getSimplices()` メソッドで取得できます。
      * 
      * SciPyの `scipy.spatial.Delaunay.simplices` 属性に対応します。
      */
