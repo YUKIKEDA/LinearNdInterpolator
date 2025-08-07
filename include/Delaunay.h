@@ -820,28 +820,306 @@ private:
     }
 
     // --- Private Member Variables ---
+    
+    // ==========================================
     // `_QhullUser` 由来の属性
+    // ==========================================
+    
+    /**
+     * @brief 入力点群の座標データ
+     * 
+     * 三角形分割を実行する元となる点群の座標を格納します。
+     * 各要素 `points_[i]` は i 番目の点の座標ベクトルを表し、
+     * 全ての点は同じ次元数 (ndim_) を持ちます。
+     * 
+     * - `points_[i][j]` = i番目の点のj次元目の座標
+     * - サイズ: `npoints_ × ndim_`
+     * 
+     * SciPyの `scipy.spatial.Delaunay.points` 属性に対応します。
+     */
     std::vector<std::vector<double>> points_;
+    
+    /**
+     * @brief 入力点群の次元数
+     * 
+     * 各点の座標ベクトルの要素数を表します。
+     * 2次元の場合は2、3次元の場合は3となります。
+     * 
+     * 値は最初の点 `points_[0].size()` から決定され、
+     * 全ての点が同じ次元数を持つ必要があります。
+     * 
+     * SciPyの `scipy.spatial.Delaunay.ndim` 属性に対応します。
+     */
     size_t ndim_;
+    
+    /**
+     * @brief 入力点群の点の総数
+     * 
+     * `points_` ベクトルのサイズと等価で、
+     * 三角形分割に使用される点の総数を表します。
+     * 
+     * 値は `points_.size()` から決定されます。
+     * 
+     * SciPyの `scipy.spatial.Delaunay.npoints` 属性に対応します。
+     */
     size_t npoints_;
+    
+    /**
+     * @brief 各次元における点群の最小値
+     * 
+     * 全ての入力点の各次元における最小座標値を格納します。
+     * 境界ボックス（bounding box）の下限を定義し、
+     * 点位置判定の早期除外に使用されます。
+     * 
+     * - `min_bound_[j]` = j次元目の最小座標値
+     * - サイズ: `ndim_`
+     * 
+     * `calculateBounds()` メソッドにより計算されます。
+     * SciPyの `scipy.spatial.Delaunay.min_bound` 属性に対応します。
+     */
     std::vector<double> min_bound_;
+    
+    /**
+     * @brief 各次元における点群の最大値
+     * 
+     * 全ての入力点の各次元における最大座標値を格納します。
+     * 境界ボックス（bounding box）の上限を定義し、
+     * 点位置判定の早期除外に使用されます。
+     * 
+     * - `max_bound_[j]` = j次元目の最大座標値  
+     * - サイズ: `ndim_`
+     * 
+     * `calculateBounds()` メソッドにより計算されます。
+     * SciPyの `scipy.spatial.Delaunay.max_bound` 属性に対応します。
+     */
     std::vector<double> max_bound_;
 
-    // `Delaunay` 由来
-    double paraboloid_scale_, paraboloid_shift_;
+    // ==========================================
+    // `Delaunay` 由来の属性
+    // ==========================================
+    
+    /**
+     * @brief パラボロイド変換のスケーリング係数
+     * 
+     * ドロネー三角形分割において、n次元点を(n+1)次元パラボロイドに
+     * 変換する際のスケーリング係数です。数値安定性の向上に使用されます。
+     * 
+     * 変換式: `z[n] = (Σᵢ x[i]²) × paraboloid_scale + paraboloid_shift`
+     * 
+     * Qhullライブラリによって自動計算され、
+     * `liftPoint()` メソッドで使用されます。
+     * 
+     * SciPyの `scipy.spatial.Delaunay.paraboloid_scale` 属性に対応します。
+     */
+    double paraboloid_scale_;
+    
+    /**
+     * @brief パラボロイド変換のオフセット値
+     * 
+     * ドロネー三角形分割において、n次元点を(n+1)次元パラボロイドに
+     * 変換する際のオフセット値です。数値精度の向上に使用されます。
+     * 
+     * 変換式: `z[n] = (Σᵢ x[i]²) × paraboloid_scale + paraboloid_shift`
+     * 
+     * Qhullライブラリによって自動計算され、
+     * `liftPoint()` メソッドで使用されます。
+     * 
+     * SciPyの `scipy.spatial.Delaunay.paraboloid_shift` 属性に対応します。
+     */
+    double paraboloid_shift_;
+    
+    /**
+     * @brief 三角形分割によって生成された単体（simplex）の頂点インデックス配列
+     * 
+     * 各単体は入力点群のインデックスで表現された(ndim+1)個の頂点を持ちます。
+     * - 2次元: 三角形（3頂点）
+     * - 3次元: 四面体（4頂点）
+     * - N次元: N+1頂点
+     * 
+     * - `simplices_[i]` = i番目の単体
+     * - `simplices_[i][j]` = i番目の単体のj番目の頂点のインデックス
+     * - サイズ: `nsimplex_ × (ndim_+1)`
+     * 
+     * Qhullライブラリによって計算され、
+     * `get_simplices()` メソッドで取得できます。
+     * 
+     * SciPyの `scipy.spatial.Delaunay.simplices` 属性に対応します。
+     */
     std::vector<std::vector<int>> simplices_;
+    
+    /**
+     * @brief 各単体の隣接単体インデックス配列
+     * 
+     * 各単体に対して、その面を共有する隣接単体のインデックスを格納します。
+     * 境界にある面（凸包の境界）の隣接は -1 で表現されます。
+     * 
+     * - `neighbors_[i]` = i番目の単体の隣接単体配列
+     * - `neighbors_[i][j]` = i番目の単体のj番目の面の隣接単体インデックス
+     * - サイズ: `nsimplex_ × (ndim_+1)`
+     * 
+     * 値 -1 は境界面（隣接する単体が存在しない）を示します。
+     * 
+     * 単体探索アルゴリズム（`findSimplex()`）で使用され、
+     * 効率的な歩行探索を可能にします。
+     * 
+     * SciPyの `scipy.spatial.Delaunay.neighbors` 属性に対応します。
+     */
     std::vector<std::vector<int>> neighbors_;
+    
+    /**
+     * @brief 各単体に対応する超平面の方程式係数
+     * 
+     * パラボロイド変換後の(ndim+1)次元空間において、
+     * 各単体が定義する超平面の方程式 `ax₀ + bx₁ + ... + cx_n + d = 0` の
+     * 係数 (a, b, ..., c, d) を格納します。
+     * 
+     * - `equations_[i]` = i番目の単体の超平面方程式係数
+     * - `equations_[i][j]` = j番目の係数（j=0..ndim: 法線成分、j=ndim+1: 定数項）
+     * - サイズ: `nsimplex_ × (ndim_+2)`
+     * 
+     * 点と単体の位置関係判定（`distplane()`）で使用され、
+     * 単体探索の核心となる計算に必要です。
+     * 
+     * SciPyの `scipy.spatial.Delaunay.equations` 属性に対応します。
+     */
     std::vector<std::vector<double>> equations_;
+    
+    /**
+     * @brief 各単体に共面な点のインデックス配列
+     * 
+     * 退化した単体（体積が0の単体）に共面な入力点のインデックスを格納します。
+     * 通常のドロネー三角形分割では使用されませんが、
+     * 特殊なケースでの完全性のため保持されます。
+     * 
+     * - `coplanar_[i]` = i番目の単体に共面な点のインデックス配列
+     * - サイズ: `nsimplex_ × 可変長`
+     * 
+     * ほとんどの場合は空配列となります。
+     * 
+     * SciPyの `scipy.spatial.Delaunay.coplanar` 属性に対応します。
+     */
     std::vector<std::vector<int>> coplanar_;
+    
+    /**
+     * @brief 各単体の有効性フラグ
+     * 
+     * 各単体が有効（非退化）かどうかを示すブール値を格納します。
+     * 退化した単体は数値計算で使用できないため、
+     * フラグによって区別されます。
+     * 
+     * - `good_[i]` = i番目の単体が有効かどうか
+     * - サイズ: `nsimplex_`
+     * 
+     * `true`: 有効な単体（正常な体積を持つ）
+     * `false`: 退化した単体（体積が0または数値的に不安定）
+     * 
+     * 単体探索や座標変換で、有効な単体のみを使用するよう制御されます。
+     * 
+     * SciPyの `scipy.spatial.Delaunay.good` 属性に対応します。
+     */
     std::vector<bool> good_;
+    
+    /**
+     * @brief 生成された単体の総数
+     * 
+     * 三角形分割によって生成された単体（simplex）の総数を表します。
+     * `simplices_.size()` と等価です。
+     * 
+     * この値はアルゴリズムのループ制御や
+     * メモリ確保のサイズ計算に使用されます。
+     * 
+     * SciPyの `scipy.spatial.Delaunay.nsimplex` 属性に対応します。
+     */
     size_t nsimplex_;
 
-    // 遅延評価される属性のフラグ
+    // ==========================================
+    // 遅延評価される属性の制御フラグ
+    // ==========================================
+    
+    /**
+     * @brief 座標変換行列の計算済みフラグ
+     * 
+     * 重心座標計算に必要な座標変換行列（`transform_`）が
+     * 計算済みかどうかを示すフラグです。
+     * 
+     * `false`: 未計算（必要時に計算される）
+     * `true`: 計算済み（`transform_` が有効）
+     * 
+     * 変換行列は計算コストが高いため、実際に必要になるまで
+     * 計算を遅延させる遅延評価パターンを採用しています。
+     * 
+     * SciPyの lazy evaluation システムに対応します。
+     */
     bool transform_computed_;
+    
+    /**
+     * @brief 頂点-単体対応の計算済みフラグ
+     * 
+     * 各頂点がどの単体に属するかの対応関係が
+     * 計算済みかどうかを示すフラグです。
+     * 
+     * `false`: 未計算（必要時に計算される）
+     * `true`: 計算済み（対応データ構造が有効）
+     * 
+     * この情報は特定の高度な操作で必要になりますが、
+     * 基本的な単体探索では使用されないため遅延評価されます。
+     * 
+     * SciPyの lazy evaluation システムに対応します。
+     */
     bool vertex_to_simplex_computed_;
+    
+    /**
+     * @brief 頂点-隣接頂点の計算済みフラグ
+     * 
+     * 各頂点に隣接する頂点の一覧が
+     * 計算済みかどうかを示すフラグです。
+     * 
+     * `false`: 未計算（必要時に計算される）
+     * `true`: 計算済み（隣接関係データが有効）
+     * 
+     * この情報はグラフ的な解析で必要になりますが、
+     * 基本的な三角形分割操作では使用されないため遅延評価されます。
+     * 
+     * SciPyの lazy evaluation システムに対応します。
+     */
     bool vertex_neighbor_vertices_computed_;
 
-    // 変換行列 (nsimplex * (ndim+1) * ndim のフラット配列)
+    // ==========================================
+    // 遅延評価される重い計算データ
+    // ==========================================
+    
+    /**
+     * @brief 重心座標計算用の座標変換行列
+     * 
+     * 各単体において点の重心座標を計算するための変換行列を格納します。
+     * 3次元配列 `[nsimplex_][ndim_+1][ndim_]` をフラット配列として保持します。
+     * 
+     * ## データ構造
+     * - サイズ: `nsimplex_ × (ndim_+1) × ndim_`
+     * - `transform_[i*(ndim_+1)*ndim_ + j*ndim_ + k]` = 
+     *   i番目の単体のj行k列要素
+     * 
+     * ## 変換行列の構成
+     * 各単体の変換行列は以下の形式を持ちます：
+     * ```
+     * [ T_inv_0  ]     [ r_0 ]
+     * [ T_inv_1  ]  +  [ r_1 ]
+     * [   ...    ]     [ ... ]
+     * [ T_inv_n  ]     [ r_n ]
+     * ```
+     * 
+     * - `T_inv`: ndim×ndim の逆変換行列
+     * - `r`: ndim要素のオフセットベクトル
+     * 
+     * ## 計算コスト
+     * この行列の計算は非常に重いため（O(nsimplex × ndim³)）、
+     * 実際に重心座標計算が必要になるまで遅延されます。
+     * 
+     * `transform_computed_` フラグで計算状態を管理し、
+     * `barycentricCoordinates()` 系メソッドで使用されます。
+     * 
+     * SciPyの `scipy.spatial.Delaunay.transform` 属性に対応します。
+     */
     std::vector<double> transform_;
 };
 
