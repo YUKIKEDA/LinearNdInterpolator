@@ -13,7 +13,7 @@
  * 
  * @note このクラスは最低2次元以上のデータを必要とします。
  */
-class LinearNDInterpolator {
+class LinearNdInterpolator {
 public:
     
     /**
@@ -38,10 +38,10 @@ public:
      * @sa https://github.com/scipy/scipy/blob/a0520a1b6b4b3349b8e1fc4d879aae831ecfb193/scipy/interpolate/_interpnd.pyx#L62
      * 
      */
-    LinearNDInterpolator(
+    LinearNdInterpolator(
         const std::vector<std::vector<double>>& input_points,
         const std::vector<double>& input_values)
-        : LinearNDInterpolator(input_points, _convert_to_2d(input_values)) 
+        : LinearNdInterpolator(input_points, _convert_to_2d(input_values)) 
     {
     }
 
@@ -69,7 +69,7 @@ public:
      * @sa https://github.com/scipy/scipy/blob/a0520a1b6b4b3349b8e1fc4d879aae831ecfb193/scipy/interpolate/_interpnd.pyx#L62
      * 
      */
-    LinearNDInterpolator(
+    LinearNdInterpolator(
         const std::vector<std::vector<double>>& input_points,
         const std::vector<std::vector<double>>& input_values) 
     {        

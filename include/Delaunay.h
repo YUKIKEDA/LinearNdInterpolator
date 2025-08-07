@@ -724,6 +724,9 @@ private:
      * @param barycentric_coords [out] 計算された重心座標cが格納される。
      * @param eps [in] 許容誤差。
      * @return 点が内部にあればtrue, そうでなければfalse。
+     * 
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1216
+     * 
      */
     bool barycentricInside(
         const std::vector<double>& transform_matrix,
@@ -769,6 +772,9 @@ private:
      * @param transform_matrix [in] (ndim, ndim+1) の変換行列（フラットな配列）。
      * @param point [in] ターゲットの点x。
      * @param barycentric_coords [out] 計算された重心座標cが格納される。
+     * 
+     * @sa https://github.com/scipy/scipy/blob/8bd39fe64fde804faf28dc29d7e33000bfe45cd1/scipy/spatial/_qhull.pyx#L1258
+     * 
      */
     void barycentricCoordinates(const std::vector<double>& transform_matrix,
         const std::vector<double>& point,
@@ -813,43 +819,30 @@ private:
             transform_.begin() + start_offset + simplex_size);
     }
 
+    // --- Private Member Variables ---
+    // `_QhullUser` 由来の属性
+    std::vector<std::vector<double>> points_;
+    size_t ndim_;
+    size_t npoints_;
+    std::vector<double> min_bound_;
+    std::vector<double> max_bound_;
 
+    // `Delaunay` 由来
+    double paraboloid_scale_, paraboloid_shift_;
+    std::vector<std::vector<int>> simplices_;
+    std::vector<std::vector<int>> neighbors_;
+    std::vector<std::vector<double>> equations_;
+    std::vector<std::vector<int>> coplanar_;
+    std::vector<bool> good_;
+    size_t nsimplex_;
 
+    // 遅延評価される属性のフラグ
+    bool transform_computed_;
+    bool vertex_to_simplex_computed_;
+    bool vertex_neighbor_vertices_computed_;
 
-
-
-
-
-
-
-
-
-
-
-// --- Private Member Variables ---
-// `_QhullUser` 由来の属性
-std::vector<std::vector<double>> points_;
-size_t ndim_;
-size_t npoints_;
-std::vector<double> min_bound_;
-std::vector<double> max_bound_;
-
-// `Delaunay` 由来
-double paraboloid_scale_, paraboloid_shift_;
-std::vector<std::vector<int>> simplices_;
-std::vector<std::vector<int>> neighbors_;
-std::vector<std::vector<double>> equations_;
-std::vector<std::vector<int>> coplanar_;
-std::vector<bool> good_;
-size_t nsimplex_;
-
-// 遅延評価される属性のフラグ
-bool transform_computed_;
-bool vertex_to_simplex_computed_;
-bool vertex_neighbor_vertices_computed_;
-
-// 変換行列 (nsimplex * (ndim+1) * ndim のフラット配列)
-std::vector<double> transform_;
+    // 変換行列 (nsimplex * (ndim+1) * ndim のフラット配列)
+    std::vector<double> transform_;
 };
 
 } // namespace qhull
