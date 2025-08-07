@@ -21,6 +21,7 @@ add_subdirectory(${QHULL_DIR} EXCLUDE_FROM_ALL)
 set(LIBRARY_SOURCES
     src/LinearNdInterpolator.cpp
     src/Delaunay.cpp
+    src/Qhull.cpp
 )
 
 set(LIBRARY_HEADERS
