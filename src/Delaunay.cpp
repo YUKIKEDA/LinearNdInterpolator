@@ -534,31 +534,42 @@ bool Delaunay::barycentricInside(
     barycentric_coords.resize(ndim_ + 1);
 
     // c[ndim] = 1.0
+    // 最後の重心座標を1で初期化（他の座標を引いて最終値を求める）
     barycentric_coords[ndim_] = 1.0;
 
     // for i in range(ndim):
+    // 各次元の重心座標を順次計算し、同時に有効性をチェック
     for (size_t i = 0; i < ndim_; ++i) {
         // c[i] = 0
         barycentric_coords[i] = 0.0;
+        
         // for j in range(ndim):
+        // 変換行列を使用してi番目の重心座標を計算
         for (size_t j = 0; j < ndim_; ++j) {
+            // transform_matrix[ndim*i + j]: 変換行列T_inv[i,j]
+            // transform_matrix[ndim*ndim + j]: 参照点r[j]
             barycentric_coords[i] += transform_matrix[ndim_ * i + j] * (point[j] - transform_matrix[ndim_ * ndim_ + j]);
         }
+        
         // c[ndim] -= c[i]
+        // 最後の座標から現在の座標を減算（重心座標の和=1制約を維持）
         barycentric_coords[ndim_] -= barycentric_coords[i];
 
         // if not (-eps <= c[i] <= 1 + eps): return 0
+        // 早期リターン：i番目の座標が有効範囲外なら即座にfalseを返す
         if (!(barycentric_coords[i] >= -eps && barycentric_coords[i] <= 1.0 + eps)) {
             return false;
         }
     }
 
     // if not (-eps <= c[ndim] <= 1 + eps): return 0
+    // 最後の重心座標も有効範囲内かチェック
     if (!(barycentric_coords[ndim_] >= -eps && barycentric_coords[ndim_] <= 1.0 + eps)) {
         return false;
     }
 
     // return 1
+    // 全ての重心座標が有効範囲内：点は単体内部にある
     return true;
 }
 
@@ -570,18 +581,26 @@ void Delaunay::barycentricCoordinates(const std::vector<double>& transform_matri
     barycentric_coords.resize(ndim_ + 1);
 
     // c[ndim] = 1.0
+    // 最後の重心座標を1で初期化（他の座標を減算して最終値を求める）
     barycentric_coords[ndim_] = 1.0;
 
     // for i in range(ndim):
+    // 各次元の重心座標を順次計算
     for (size_t i = 0; i < ndim_; ++i) {
         // c[i] = 0
         barycentric_coords[i] = 0.0;
+        
         // for j in range(ndim):
+        // 変換行列を使用してi番目の重心座標を計算
         for (size_t j = 0; j < ndim_; ++j) {
             // c[i] += transform[ndim*i + j] * (x[j] - transform[ndim*ndim + j])
+            // transform_matrix[ndim*i + j]: 変換行列T_inv[i,j]
+            // transform_matrix[ndim*ndim + j]: 参照点r[j]
             barycentric_coords[i] += transform_matrix[ndim_ * i + j] * (point[j] - transform_matrix[ndim_ * ndim_ + j]);
         }
+        
         // c[ndim] -= c[i]
+        // 重心座標の和=1制約を満たすため、最後の座標から現在の座標を減算
         barycentric_coords[ndim_] -= barycentric_coords[i];
     }
 }
